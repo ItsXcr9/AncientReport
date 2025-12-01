@@ -26,10 +26,10 @@ interface Report {
     network: { packets_sent: number; packets_received: number; drops: number }
   }
   top_processes?: {
-    cpu: Array<{ name: string; pid: string; average: number; peak: number }>
-    memory: Array<{ name: string; pid: string; average: number; peak: number }>
-    disk_io: Array<{ name: string; pid: string; average: number; peak: number }>
-    network: Array<{ name: string; pid: string; average: number; peak: number }>
+    cpu: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
+    memory: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
+    disk_io: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
+    network: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
   }
   ai_insights: {
     critical_alerts: string[]
@@ -403,16 +403,23 @@ function App() {
                           </h5>
                           <div className="space-y-2">
                             {report.top_processes.cpu.map((proc, i) => (
-                              <div key={i} className="flex items-center justify-between p-2 bg-white/5 rounded border border-white/10">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-blue-400 w-6">#{i + 1}</span>
-                                  <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
-                                  <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                              <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-blue-400 w-6">#{i + 1}</span>
+                                    <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
+                                    <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-sm font-semibold text-blue-300">{(proc?.average || 0).toFixed(1)}%</span>
+                                    <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)}%</span>
+                                  </div>
                                 </div>
-                                <div className="text-right">
-                                  <span className="text-sm font-semibold text-blue-300">{(proc?.average || 0).toFixed(1)}%</span>
-                                  <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)}%</span>
-                                </div>
+                                {proc?.command_line && (
+                                  <div className="ml-8 mt-1">
+                                    <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -427,16 +434,23 @@ function App() {
                           </h5>
                           <div className="space-y-2">
                             {report.top_processes.memory.map((proc, i) => (
-                              <div key={i} className="flex items-center justify-between p-2 bg-white/5 rounded border border-white/10">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-purple-400 w-6">#{i + 1}</span>
-                                  <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
-                                  <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                              <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-purple-400 w-6">#{i + 1}</span>
+                                    <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
+                                    <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-sm font-semibold text-purple-300">{(proc?.average || 0).toFixed(1)} MB</span>
+                                    <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
+                                  </div>
                                 </div>
-                                <div className="text-right">
-                                  <span className="text-sm font-semibold text-purple-300">{(proc?.average || 0).toFixed(1)} MB</span>
-                                  <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
-                                </div>
+                                {proc?.command_line && (
+                                  <div className="ml-8 mt-1">
+                                    <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -451,16 +465,23 @@ function App() {
                           </h5>
                           <div className="space-y-2">
                             {report.top_processes.disk_io.map((proc, i) => (
-                              <div key={i} className="flex items-center justify-between p-2 bg-white/5 rounded border border-white/10">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-green-400 w-6">#{i + 1}</span>
-                                  <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
-                                  <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                              <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-green-400 w-6">#{i + 1}</span>
+                                    <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
+                                    <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-sm font-semibold text-green-300">{(proc?.average || 0).toFixed(1)} MB</span>
+                                    <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
+                                  </div>
                                 </div>
-                                <div className="text-right">
-                                  <span className="text-sm font-semibold text-green-300">{(proc?.average || 0).toFixed(1)} MB</span>
-                                  <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
-                                </div>
+                                {proc?.command_line && (
+                                  <div className="ml-8 mt-1">
+                                    <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

@@ -398,8 +398,8 @@ impl ProcCollector {
         info!("[TOP PROCESSES] Second refresh...");
         self.system.refresh_processes();
         
-        let mut cpu_processes: Vec<(f32, String, u32)> = Vec::new();
-        let mut memory_processes: Vec<(u64, String, u32)> = Vec::new();
+        let mut cpu_processes: Vec<(f32, String, u32, String)> = Vec::new();
+        let mut memory_processes: Vec<(u64, String, u32, String)> = Vec::new();
         
         // Collect CPU and memory usage for all processes
         info!("[TOP PROCESSES] Iterating through processes...");
@@ -410,12 +410,21 @@ impl ProcCollector {
             let memory_usage = process.memory();
             let name = process.name().to_string();
             
+            // Get full command line
+            let cmd_line = process.cmd().join(" ");
+            // Limit command line length to avoid huge tags (max 500 chars)
+            let cmd_line_short = if cmd_line.len() > 500 {
+                format!("{}...", &cmd_line[..497])
+            } else {
+                cmd_line
+            };
+            
             // Collect all processes, even with 0 CPU (we'll sort and take top)
             // This ensures we get processes even if CPU is low
-            cpu_processes.push((cpu_usage, name.clone(), pid.as_u32()));
+            cpu_processes.push((cpu_usage, name.clone(), pid.as_u32(), cmd_line_short.clone()));
             
             if memory_usage > 0 {
-                memory_processes.push((memory_usage, name, pid.as_u32()));
+                memory_processes.push((memory_usage, name, pid.as_u32(), cmd_line_short));
             }
         }
         
@@ -435,12 +444,13 @@ impl ProcCollector {
         
         // Store top 3 CPU processes (even if CPU is 0, we still want to track them)
         info!("[TOP PROCESSES] Storing top {} CPU processes", cpu_processes.len().min(3));
-        for (idx, (cpu, name, pid)) in cpu_processes.iter().take(3).enumerate() {
+        for (idx, (cpu, name, pid, cmd_line)) in cpu_processes.iter().take(3).enumerate() {
             info!("[TOP PROCESSES] Sending CPU process metric #{}: {} (PID: {}) = {:.2}%", idx + 1, name, pid, cpu);
             let mut process_tags = tags.clone();
             process_tags.insert("process_name".to_string(), name.clone());
             process_tags.insert("pid".to_string(), pid.to_string());
             process_tags.insert("rank".to_string(), (idx + 1).to_string());
+            process_tags.insert("command_line".to_string(), cmd_line.clone());
             
             match self.metrics_tx.send(Metric {
                 timestamp,
@@ -460,12 +470,13 @@ impl ProcCollector {
         
         // Store top 3 memory processes
         info!("[TOP PROCESSES] Storing top {} memory processes", memory_processes.len().min(3));
-        for (idx, (memory, name, pid)) in memory_processes.iter().take(3).enumerate() {
+        for (idx, (memory, name, pid, cmd_line)) in memory_processes.iter().take(3).enumerate() {
             info!("[TOP PROCESSES] Sending memory process metric #{}: {} (PID: {}) = {} MB", idx + 1, name, pid, memory / 1024 / 1024);
             let mut process_tags = tags.clone();
             process_tags.insert("process_name".to_string(), name.clone());
             process_tags.insert("pid".to_string(), pid.to_string());
             process_tags.insert("rank".to_string(), (idx + 1).to_string());
+            process_tags.insert("command_line".to_string(), cmd_line.clone());
             
             self.metrics_tx.send(Metric {
                 timestamp,
@@ -480,11 +491,19 @@ impl ProcCollector {
         // For disk I/O and network, we'll collect from /proc/<pid>/io
         // This is more complex, so we'll do a simplified version
         // Collect top processes by reading /proc/<pid>/io for disk I/O
-        let mut disk_io_processes: Vec<(u64, String, u32)> = Vec::new();
+        let mut disk_io_processes: Vec<(u64, String, u32, String)> = Vec::new();
         
         for (pid, process) in self.system.processes() {
             let name = process.name().to_string();
             let pid_num = pid.as_u32();
+            
+            // Get full command line
+            let cmd_line = process.cmd().join(" ");
+            let cmd_line_short = if cmd_line.len() > 500 {
+                format!("{}...", &cmd_line[..497])
+            } else {
+                cmd_line
+            };
             
             // Try to read /proc/<pid>/io for disk I/O stats
             // Note: Agent runs in container with /proc mounted at /host/proc, so we read from host
@@ -511,7 +530,7 @@ impl ProcCollector {
                 
                 let total_io = read_bytes + write_bytes;
                 if total_io > 0 {
-                    disk_io_processes.push((total_io, name, pid_num));
+                    disk_io_processes.push((total_io, name, pid_num, cmd_line_short));
                 }
             }
         }
@@ -520,12 +539,13 @@ impl ProcCollector {
         
         info!("[TOP PROCESSES] Found {} disk I/O processes, storing top 3", disk_io_processes.len());
         // Store top 3 disk I/O processes
-        for (idx, (io_bytes, name, pid)) in disk_io_processes.iter().take(3).enumerate() {
+        for (idx, (io_bytes, name, pid, cmd_line)) in disk_io_processes.iter().take(3).enumerate() {
             info!("[TOP PROCESSES] Sending disk I/O process metric #{}: {} (PID: {}) = {} MB", idx + 1, name, pid, io_bytes / 1024 / 1024);
             let mut process_tags = tags.clone();
             process_tags.insert("process_name".to_string(), name.clone());
             process_tags.insert("pid".to_string(), pid.to_string());
             process_tags.insert("rank".to_string(), (idx + 1).to_string());
+            process_tags.insert("command_line".to_string(), cmd_line.clone());
             
             self.metrics_tx.send(Metric {
                 timestamp,

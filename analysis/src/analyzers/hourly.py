@@ -702,11 +702,13 @@ class HourlyAnalyzer:
                 pid,
                 avg_value,
                 max_value,
-                sample_count
+                sample_count,
+                command_line
             FROM (
                 SELECT 
                     tags['process_name'] as process_name,
                     tags['pid'] as pid,
+                    any(tags['command_line']) as command_line,
                     avg(value) as avg_value,
                     max(value) as max_value,
                     count(*) as sample_count
@@ -756,6 +758,10 @@ class HourlyAnalyzer:
                         sample_count_idx = col_map.get('sample_count')
                         sample_count = int(row[sample_count_idx]) if sample_count_idx is not None and len(row) > sample_count_idx and row[sample_count_idx] is not None else 0
                         
+                        # Get command line if available
+                        command_line_idx = col_map.get('command_line')
+                        command_line = str(row[command_line_idx]) if command_line_idx is not None and len(row) > command_line_idx and row[command_line_idx] else ""
+                        
                         # Skip invalid processes
                         if not process_name or process_name == "unknown" or process_name == "":
                             logger.debug(f"Skipping invalid process: name='{process_name}', pid='{pid}'")
@@ -767,7 +773,8 @@ class HourlyAnalyzer:
                             "name": str(process_name),
                             "pid": str(pid),
                             "average": round(avg_value, 2),
-                            "peak": round(max_value, 2)
+                            "peak": round(max_value, 2),
+                            "command_line": command_line
                         })
                     except (IndexError, KeyError, ValueError, TypeError) as e:
                         logger.warning(f"Error processing process row for {metric_name}: {e}, row={row}, columns={columns}")
