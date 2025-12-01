@@ -143,6 +143,16 @@ function App() {
         if (!Array.isArray(data.top_processes.disk_io)) data.top_processes.disk_io = []
         if (!Array.isArray(data.top_processes.network)) data.top_processes.network = []
         
+        // Debug logging for top_processes
+        console.log('Top Processes Data:', {
+          exists: !!data.top_processes,
+          cpu_count: data.top_processes?.cpu?.length || 0,
+          memory_count: data.top_processes?.memory?.length || 0,
+          disk_io_count: data.top_processes?.disk_io?.length || 0,
+          network_count: data.top_processes?.network?.length || 0,
+          cpu_sample: data.top_processes?.cpu?.[0] || null
+        })
+        
         // Ensure ai_insights structure exists with safe defaults
         if (!data.ai_insights) {
           data.ai_insights = {
@@ -484,12 +494,12 @@ function App() {
                     />
                   </div>
 
-                  {report.top_processes && (
-                    <div className="mt-4 space-y-3">
-                      <h4 className="font-semibold text-base mb-3 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-blue-400" />
-                        Top Processes (Hourly Summary)
-                      </h4>
+                  <div className="mt-4 space-y-3">
+                    <h4 className="font-semibold text-base mb-3 flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-blue-400" />
+                      Top Processes (Hourly Summary)
+                    </h4>
+                    {report.top_processes ? (
                       {report.top_processes.cpu && Array.isArray(report.top_processes.cpu) && report.top_processes.cpu.length > 0 && (
                         <div className="p-4 bg-gradient-to-r from-blue-500/10 to-blue-600/5 rounded-lg border border-blue-500/20">
                           <h5 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
@@ -593,8 +603,12 @@ function App() {
                           }
                         </div>
                       )}
-                    </div>
-                  )}
+                    ) : (
+                      <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
+                        No process data available yet. Wait for the next hourly analysis.
+                      </div>
+                    )}
+                  </div>
 
                   {(() => {
                     try {
