@@ -23,8 +23,33 @@ pub struct ProcCollector {
 impl ProcCollector {
     pub fn new(hostname: String, metrics_tx: mpsc::Sender<Metric>) -> Self {
         info!("Initializing /proc collector...");
+        info!("Note: Agent should run with 'pid: host' to see host processes, not container processes");
+        
+        // Verify we can access host /proc (mounted at /host/proc in container)
+        // This helps ensure we're reading from the host, not the container
+        let system = System::new_all();
+        
+        // Log a sample of processes to verify we're seeing host processes
+        // If we only see container processes (like the agent itself), that's a problem
+        system.refresh_processes();
+        let process_count = system.processes().len();
+        info!("Initial process count: {} (should be > 50 for host, < 10 for container)", process_count);
+        
+        // Check for a host process that shouldn't be in container (e.g., systemd, kernel threads)
+        let has_host_processes = system.processes().iter().any(|(_, proc)| {
+            let name = proc.name().to_lowercase();
+            name.contains("systemd") || name.contains("kthreadd") || name.contains("ksoftirqd")
+        });
+        
+        if has_host_processes {
+            info!("✓ Detected host processes (systemd/kthreadd) - reading from host /proc");
+        } else {
+            tracing::warn!("⚠️  No host processes detected - may be reading from container /proc");
+            tracing::warn!("⚠️  Ensure docker-compose.yml has 'pid: host' for agent service");
+        }
+        
         Self {
-            system: System::new_all(),
+            system,
             hostname,
             metrics_tx,
             last_disk_stats: None,
@@ -404,11 +429,21 @@ impl ProcCollector {
         // Collect CPU and memory usage for all processes
         info!("[TOP PROCESSES] Iterating through processes...");
         let mut process_count = 0;
+        let mut host_process_count = 0;
         for (pid, process) in self.system.processes() {
             process_count += 1;
             let cpu_usage = process.cpu_usage();
             let memory_usage = process.memory();
             let name = process.name().to_string();
+            
+            // Verify we're seeing host processes (not just container processes)
+            // Host processes typically include systemd, kernel threads, etc.
+            let name_lower = name.to_lowercase();
+            if name_lower.contains("systemd") || name_lower.contains("kthreadd") || 
+               name_lower.contains("ksoftirqd") || name_lower.contains("dockerd") ||
+               pid.as_u32() == 1 {  // PID 1 on host is usually systemd/init
+                host_process_count += 1;
+            }
             
             // Get full command line
             let cmd_line = process.cmd().join(" ");
@@ -428,7 +463,11 @@ impl ProcCollector {
             }
         }
         
-        info!("[TOP PROCESSES] Processed {} total processes", process_count);
+        info!("[TOP PROCESSES] Processed {} total processes ({} host processes detected)", process_count, host_process_count);
+        if host_process_count == 0 && process_count < 20 {
+            tracing::warn!("[TOP PROCESSES] ⚠️  WARNING: Only {} processes found, may be reading from container instead of host!", process_count);
+            tracing::warn!("[TOP PROCESSES] ⚠️  Ensure docker-compose.yml has 'pid: host' for agent service");
+        }
         info!("[TOP PROCESSES] Collected {} CPU processes, {} memory processes", cpu_processes.len(), memory_processes.len());
         
         // Sort and get top 3
@@ -588,4 +627,5 @@ struct NetStats {
     rx_drops: u64,
     tx_drops: u64,
 }
+
 
