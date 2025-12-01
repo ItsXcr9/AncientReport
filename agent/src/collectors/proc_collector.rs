@@ -27,7 +27,7 @@ impl ProcCollector {
         
         // Verify we can access host /proc (mounted at /host/proc in container)
         // This helps ensure we're reading from the host, not the container
-        let system = System::new_all();
+        let mut system = System::new_all();
         
         // Log a sample of processes to verify we're seeing host processes
         // If we only see container processes (like the agent itself), that's a problem
