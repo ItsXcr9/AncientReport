@@ -500,7 +500,8 @@ function App() {
                       Top Processes (Hourly Summary)
                     </h4>
                     {report.top_processes ? (
-                      {report.top_processes.cpu && Array.isArray(report.top_processes.cpu) && report.top_processes.cpu.length > 0 && (
+                      <>
+                        {report.top_processes.cpu && Array.isArray(report.top_processes.cpu) && report.top_processes.cpu.length > 0 && (
                         <div className="p-4 bg-gradient-to-r from-blue-500/10 to-blue-600/5 rounded-lg border border-blue-500/20">
                           <h5 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
                             <Activity className="w-4 h-4" />
@@ -603,6 +604,7 @@ function App() {
                           }
                         </div>
                       )}
+                      </>
                     ) : (
                       <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
                         No process data available yet. Wait for the next hourly analysis.
