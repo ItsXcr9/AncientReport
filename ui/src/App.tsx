@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp } from 'lucide-react';
+import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp, Loader2, Clock } from 'lucide-react';
 import { CPUChart } from './components/CPUChart'
 import { MemoryChart } from './components/MemoryChart'
 import { DiskIOChart } from './components/DiskIOChart'
@@ -45,6 +45,9 @@ function App() {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [reportLoading, setReportLoading] = useState(false)
+  const [lastTriggerTime, setLastTriggerTime] = useState<number | null>(null)
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0)
+  const [isTriggering, setIsTriggering] = useState(false)
 
   useEffect(() => {
     fetchHealth()
@@ -55,6 +58,27 @@ function App() {
     }, 600000) // Refresh every 10 minutes (600000ms)
     return () => clearInterval(interval)
   }, [])
+
+  // Cooldown timer for trigger analysis button
+  useEffect(() => {
+    if (lastTriggerTime === null) return
+
+    const COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes in milliseconds
+    const updateCooldown = () => {
+      const elapsed = Date.now() - lastTriggerTime!
+      const remaining = Math.max(0, COOLDOWN_MS - elapsed)
+      setCooldownRemaining(remaining)
+
+      if (remaining > 0) {
+        // Update every second
+        setTimeout(updateCooldown, 1000)
+      } else {
+        setLastTriggerTime(null)
+      }
+    }
+
+    updateCooldown()
+  }, [lastTriggerTime])
 
   const fetchHealth = async () => {
     try {
@@ -144,8 +168,16 @@ function App() {
   }
 
   const triggerAnalysis = async () => {
+    // Check cooldown
+    if (cooldownRemaining > 0 || isTriggering) {
+      return
+    }
+
     try {
+      setIsTriggering(true)
       setReportLoading(true)
+      setLastTriggerTime(Date.now())
+      
       console.log('Triggering analysis...', {
         browser: navigator.userAgent,
         timestamp: new Date().toISOString()
@@ -197,9 +229,19 @@ function App() {
         stack: error instanceof Error ? error.stack : undefined
       })
       alert(`Failed to trigger analysis: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      // Reset cooldown on error so user can retry
+      setLastTriggerTime(null)
+      setCooldownRemaining(0)
     } finally {
+      setIsTriggering(false)
       setReportLoading(false)
     }
+  }
+
+  const formatCooldownTime = (ms: number): string => {
+    const minutes = Math.floor(ms / 60000)
+    const seconds = Math.floor((ms % 60000) / 1000)
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
   return (
@@ -262,15 +304,45 @@ function App() {
                 <TrendingUp className="w-5 h-5 text-blue-400" />
                 Latest Analysis
               </h2>
-              <button
-                onClick={triggerAnalysis}
-                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors text-sm font-medium"
-              >
-                Trigger Analysis
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={triggerAnalysis}
+                  disabled={cooldownRemaining > 0 || isTriggering}
+                  className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 ${
+                    cooldownRemaining > 0 || isTriggering
+                      ? 'bg-gray-600 cursor-not-allowed opacity-60'
+                      : 'bg-blue-500 hover:bg-blue-600'
+                  }`}
+                >
+                  {isTriggering ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Triggering...</span>
+                    </>
+                  ) : cooldownRemaining > 0 ? (
+                    <>
+                      <Clock className="w-4 h-4" />
+                      <span>Cooldown: {formatCooldownTime(cooldownRemaining)}</span>
+                    </>
+                  ) : (
+                    'Trigger Analysis'
+                  )}
+                </button>
+              </div>
             </div>
-            <div className="space-y-4">
-              {reportLoading ? (
+            <div className="space-y-4 relative">
+              {isTriggering && (
+                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm rounded-lg z-10 flex items-center justify-center">
+                  <div className="bg-white/10 rounded-lg p-6 border border-white/20">
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+                      <p className="text-sm font-medium text-gray-200">Triggering Analysis...</p>
+                      <p className="text-xs text-gray-400">This may take a few moments</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {reportLoading && !isTriggering ? (
                 <div className="p-4 text-center text-gray-400">Loading report...</div>
               ) : report ? (
                 <>
