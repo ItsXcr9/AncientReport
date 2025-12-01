@@ -708,7 +708,7 @@ class HourlyAnalyzer:
                 SELECT 
                     tags['process_name'] as process_name,
                     tags['pid'] as pid,
-                    any(tags['command_line']) as command_line,
+                    if(has(tags, 'command_line'), any(tags['command_line']), '') as command_line,
                     avg(value) as avg_value,
                     max(value) as max_value,
                     count(*) as sample_count
@@ -760,7 +760,20 @@ class HourlyAnalyzer:
                         
                         # Get command line if available
                         command_line_idx = col_map.get('command_line')
-                        command_line = str(row[command_line_idx]) if command_line_idx is not None and len(row) > command_line_idx and row[command_line_idx] else ""
+                        if command_line_idx is not None and len(row) > command_line_idx and row[command_line_idx]:
+                            command_line = str(row[command_line_idx]).strip()
+                            # Remove empty string if it's just whitespace or empty
+                            if command_line == "" or command_line == "None":
+                                command_line = ""
+                        else:
+                            command_line = ""
+                        
+                        # Log command_line status for debugging
+                        if metric_name in ["process_cpu_usage", "process_memory_mb"]:
+                            if command_line:
+                                logger.debug(f"Process {process_name} (PID: {pid}) has command_line: {command_line[:50]}...")
+                            else:
+                                logger.debug(f"Process {process_name} (PID: {pid}) has no command_line (idx: {command_line_idx}, row_len: {len(row)})")
                         
                         # Skip invalid processes
                         if not process_name or process_name == "unknown" or process_name == "":
