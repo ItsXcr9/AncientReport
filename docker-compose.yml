@@ -59,6 +59,8 @@ services:
       GEMINI_API_KEY: AIzaSyBPVfd9gaxGvc0FWZzcruZghvWa7MCTcJQ
       AI_PROVIDER: google
       AI_MODEL: gemini-2.5-flash-lite
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - clickhouse
     networks:
