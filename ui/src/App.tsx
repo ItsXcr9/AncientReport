@@ -720,37 +720,6 @@ function App() {
               )}
             </div>
         </section>
-
-          {/* Quick Actions */}
-          <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
-            <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
-            <div className="space-y-3">
-              <ActionButton
-                label="View Latest Report"
-                onClick={() => window.location.href = '/api/reports/latest'}
-              />
-              <ActionButton
-                label="Trigger Daily Analysis"
-                onClick={async () => {
-                  await fetch('/api/analysis/trigger/daily', { method: 'POST' })
-                  alert('Daily analysis triggered!')
-                }}
-              />
-              <ActionButton
-                label="System Metrics"
-                onClick={() => window.open('http://localhost:5123', '_blank')}
-              />
-            </div>
-
-            <div className="mt-6 p-4 bg-gradient-to-br from-purple-500/10 to-pink-500/10 rounded-lg border border-purple-500/20">
-              <h3 className="text-sm font-medium mb-2">System Info</h3>
-              <div className="text-xs text-gray-400 space-y-1">
-                <p>Version: {health?.version || '1.0.0'}</p>
-                <p>Service: {health?.service || 'AncientReport AI'}</p>
-                <p>Status: {health?.status || 'Unknown'}</p>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Docker Containers Section - Horizontal Layout */}
@@ -821,19 +790,6 @@ function MetricBox({ label, value, trend }: {
   )
 }
 
-function ActionButton({ label, onClick }: {
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full px-4 py-3 bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 transition-colors text-left text-sm font-medium"
-    >
-      {label}
-    </button>
-  )
-}
 
 function FeatureCard({ title, description, icon }: {
   title: string
