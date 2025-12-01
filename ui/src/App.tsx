@@ -45,7 +45,22 @@ function App() {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [reportLoading, setReportLoading] = useState(false)
-  const [lastTriggerTime, setLastTriggerTime] = useState<number | null>(null)
+  const [lastTriggerTime, setLastTriggerTime] = useState<number | null>(() => {
+    // Load from localStorage on mount
+    const stored = localStorage.getItem('lastTriggerTime')
+    if (stored) {
+      const time = parseInt(stored, 10)
+      const COOLDOWN_MS = 5 * 60 * 1000
+      const elapsed = Date.now() - time
+      // Only restore if still in cooldown
+      if (elapsed < COOLDOWN_MS) {
+        return time
+      } else {
+        localStorage.removeItem('lastTriggerTime')
+      }
+    }
+    return null
+  })
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0)
   const [isTriggering, setIsTriggering] = useState(false)
 
@@ -61,7 +76,10 @@ function App() {
 
   // Cooldown timer for trigger analysis button
   useEffect(() => {
-    if (lastTriggerTime === null) return
+    if (lastTriggerTime === null) {
+      setCooldownRemaining(0)
+      return
+    }
 
     const COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes in milliseconds
     const updateCooldown = () => {
@@ -74,6 +92,7 @@ function App() {
         setTimeout(updateCooldown, 1000)
       } else {
         setLastTriggerTime(null)
+        localStorage.removeItem('lastTriggerTime')
       }
     }
 
@@ -176,7 +195,10 @@ function App() {
     try {
       setIsTriggering(true)
       setReportLoading(true)
-      setLastTriggerTime(Date.now())
+      const triggerTime = Date.now()
+      setLastTriggerTime(triggerTime)
+      // Persist to localStorage to survive page refreshes
+      localStorage.setItem('lastTriggerTime', triggerTime.toString())
       
       console.log('Triggering analysis...', {
         browser: navigator.userAgent,
@@ -232,6 +254,7 @@ function App() {
       // Reset cooldown on error so user can retry
       setLastTriggerTime(null)
       setCooldownRemaining(0)
+      localStorage.removeItem('lastTriggerTime')
     } finally {
       setIsTriggering(false)
       setReportLoading(false)
