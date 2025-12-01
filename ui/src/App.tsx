@@ -52,7 +52,7 @@ function App() {
     const interval = setInterval(() => {
       fetchHealth()
       fetchLatestReport()
-    }, 30000)
+    }, 600000) // Refresh every 10 minutes (600000ms)
     return () => clearInterval(interval)
   }, [])
 
