@@ -35,8 +35,10 @@ export const ContainerHealthchecks: React.FC = () => {
   };
 
   useEffect(() => {
+    // Load once on mount
     fetchHealthchecks();
-    const interval = setInterval(fetchHealthchecks, 30000); // Refresh every 30 seconds
+    // Then refresh every 3 minutes (180000ms) - healthchecks don't change frequently
+    const interval = setInterval(fetchHealthchecks, 180000);
     return () => clearInterval(interval);
   }, []);
 
