@@ -11,6 +11,7 @@ from analyzers.daily import DailyAnalyzer
 from storage.clickhouse_client import ClickHouseClient
 from ai.engine import AIEngine
 from api import containers
+from api import healthchecks
 from utils.timezone import now, from_iso, format_for_display, format_for_chart
 
 # Configure logging
@@ -38,6 +39,7 @@ app.add_middleware(
 
 # Register routers
 app.include_router(containers.router, prefix="/api/containers", tags=["containers"])
+app.include_router(healthchecks.router, prefix="/api", tags=["healthchecks"])
 
 # Global instances
 clickhouse_client = None

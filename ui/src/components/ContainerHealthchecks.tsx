@@ -1,0 +1,169 @@
+import React, { useEffect, useState } from 'react';
+import { Activity, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+
+interface ContainerHealthcheck {
+  id: string;
+  name: string;
+  health_status: 'healthy' | 'unhealthy' | 'starting' | 'none';
+  health_test: string;
+  failing_streak: number;
+  last_log: string;
+}
+
+export const ContainerHealthchecks: React.FC = () => {
+  const [healthchecks, setHealthchecks] = useState<ContainerHealthcheck[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+
+  const fetchHealthchecks = async () => {
+    try {
+      const response = await fetch('/api/healthchecks');
+      if (!response.ok) {
+        throw new Error('Failed to fetch healthcheck status');
+      }
+      const data = await response.json();
+      setHealthchecks(data);
+      setLastUpdated(new Date());
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching healthchecks:', err);
+      setError('Failed to load healthcheck data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHealthchecks();
+    const interval = setInterval(fetchHealthchecks, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'healthy':
+        return <CheckCircle className="w-5 h-5 text-green-400" />;
+      case 'unhealthy':
+        return <XCircle className="w-5 h-5 text-red-400" />;
+      case 'starting':
+        return <Clock className="w-5 h-5 text-yellow-400 animate-pulse" />;
+      default:
+        return <AlertCircle className="w-5 h-5 text-gray-400" />;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'healthy':
+        return 'bg-green-500/20 border-green-500/30 text-green-400';
+      case 'unhealthy':
+        return 'bg-red-500/20 border-red-500/30 text-red-400';
+      case 'starting':
+        return 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400';
+      default:
+        return 'bg-gray-500/20 border-gray-500/30 text-gray-400';
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusMap: Record<string, string> = {
+      healthy: 'Healthy',
+      unhealthy: 'Unhealthy',
+      starting: 'Starting',
+      none: 'No Healthcheck'
+    };
+    return statusMap[status] || status;
+  };
+
+  if (loading && healthchecks.length === 0) {
+    return (
+      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <Activity className="w-5 h-5 text-blue-400" />
+          Container Healthchecks
+        </h2>
+        <div className="text-center text-gray-400 py-8">Loading healthcheck status...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-semibold flex items-center gap-2">
+          <Activity className="w-5 h-5 text-blue-400" />
+          Container Healthchecks
+          <span className="text-sm font-normal text-gray-400 ml-2">
+            ({healthchecks.length} {healthchecks.length === 1 ? 'container' : 'containers'})
+          </span>
+        </h2>
+        <div className="text-xs text-gray-400">
+          Updated: {lastUpdated.toLocaleTimeString()}
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20 text-red-400 mb-4">
+          <AlertCircle className="w-4 h-4 inline mr-2" />
+          {error}
+        </div>
+      )}
+
+      {healthchecks.length === 0 && !loading ? (
+        <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400">
+          No containers with healthchecks configured found.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {healthchecks.map((hc) => (
+            <div
+              key={hc.id}
+              className={`p-4 rounded-lg border ${getStatusColor(hc.health_status)}`}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-3 flex-1">
+                  {getStatusIcon(hc.health_status)}
+                  <div className="flex-1">
+                    <h3 className="font-medium text-sm">{hc.name}</h3>
+                    <p className="text-xs text-gray-400 mt-1 font-mono">
+                      ID: {hc.id.substring(0, 12)}...
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(hc.health_status)}`}>
+                    {getStatusBadge(hc.health_status)}
+                  </span>
+                  {hc.failing_streak > 0 && (
+                    <p className="text-xs text-red-400 mt-1">
+                      {hc.failing_streak} {hc.failing_streak === 1 ? 'failure' : 'failures'}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {hc.health_test && (
+                <div className="mt-2 pt-2 border-t border-white/10">
+                  <p className="text-xs text-gray-400 mb-1">Healthcheck Command:</p>
+                  <p className="text-xs font-mono text-gray-300 break-all">{hc.health_test}</p>
+                </div>
+              )}
+
+              {hc.last_log && (
+                <div className="mt-2 pt-2 border-t border-white/10">
+                  <p className="text-xs text-gray-400 mb-1">Last Check Output:</p>
+                  <p className="text-xs font-mono text-gray-300 break-all whitespace-pre-wrap">
+                    {hc.last_log.substring(0, 200)}
+                    {hc.last_log.length > 200 ? '...' : ''}
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+

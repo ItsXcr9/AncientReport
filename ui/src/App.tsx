@@ -5,6 +5,7 @@ import { MemoryChart } from './components/MemoryChart'
 import { DiskIOChart } from './components/DiskIOChart'
 import { NetworkChart } from './components/NetworkChart'
 import { DockerContainers } from './components/DockerContainers';
+import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 
 interface SystemHealth {
   status: string
@@ -725,6 +726,11 @@ function App() {
         {/* Docker Containers Section - Horizontal Layout */}
         <div className="mt-8 mb-8">
           <DockerContainers />
+        </div>
+
+        {/* Container Healthchecks Section */}
+        <div className="mt-8 mb-8">
+          <ContainerHealthchecks />
         </div>
 
         {/* Metrics History Charts */}
