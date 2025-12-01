@@ -1,0 +1,21 @@
+[Unit]
+Description=AncientReport AI Analysis Engine
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/AncientReport/analysis
+Environment="PYTHONPATH=/home/AncientReport/analysis/src"
+Environment="GEMINI_API_KEY=AIzaSyBPVfd9gaxGvc0FWZzcruZghvWa7MCTcJQ"
+Environment="AI_PROVIDER=google"
+Environment="AI_MODEL=gemini-2.5-flash-lite"
+ExecStart=/home/AncientReport/analysis/venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8800
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

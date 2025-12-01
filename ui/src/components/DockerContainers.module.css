@@ -1,0 +1,376 @@
+/* Container Card Styles */
+.containerCard {
+  padding: 1.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease-in-out;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.containerCard:hover {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.containerCardRunning {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.containerCardStopped {
+  border-color: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 0.75;
+}
+
+/* Container Header */
+.containerHeader {
+  margin-bottom: 0.75rem;
+}
+
+.containerHeaderTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.containerName {
+  font-weight: 600;
+  color: white;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  flex: 1;
+  word-break: break-word;
+  padding-right: 0.5rem;
+}
+
+.containerImage {
+  font-size: 0.75rem;
+  color: rgba(156, 163, 175, 1);
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Status Badge */
+.statusBadge {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.statusBadgeRunning {
+  color: rgb(74, 222, 128);
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.2);
+}
+
+.statusBadgeExited {
+  color: rgba(156, 163, 175, 1);
+  background: rgba(156, 163, 175, 0.1);
+  border-color: rgba(156, 163, 175, 0.2);
+}
+
+.statusBadgeRestarting {
+  color: rgb(250, 204, 21);
+  background: rgba(250, 204, 21, 0.1);
+  border-color: rgba(250, 204, 21, 0.2);
+}
+
+.statusBadgeDead {
+  color: rgb(248, 113, 113);
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+.statusBadgePaused {
+  color: rgb(96, 165, 250);
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.2);
+}
+
+.statusText {
+  text-transform: capitalize;
+}
+
+.statusTextHidden {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .statusTextHidden {
+    display: inline;
+  }
+}
+
+/* Stats Section */
+.statsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.statsMetrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.metricRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.metricLabel {
+  color: rgba(156, 163, 175, 1);
+}
+
+.metricValue {
+  color: rgba(229, 231, 235, 1);
+}
+
+.metricValueWarning {
+  color: rgb(248, 113, 113);
+}
+
+/* Progress Bars */
+.progressBarContainer {
+  height: 0.375rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: 9999px;
+  transition: all 0.5s ease-in-out;
+}
+
+.progressBarSafe {
+  background: rgb(59, 130, 246);
+}
+
+.progressBarWarning {
+  background: rgb(250, 204, 21);
+}
+
+.progressBarDanger {
+  background: rgb(239, 68, 68);
+}
+
+.progressBarMemory {
+  background: rgb(168, 85, 247);
+}
+
+/* Network & I/O Section */
+.networkIOSection {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ioColumn {
+  display: flex;
+  flex-direction: column;
+}
+
+.ioLabel {
+  font-size: 0.625rem;
+  color: rgba(107, 114, 128, 1);
+  text-transform: uppercase;
+}
+
+.ioValue {
+  font-size: 0.75rem;
+  color: rgba(209, 213, 219, 1);
+}
+
+/* Footer Section */
+.footerSection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.75rem;
+  color: rgba(107, 114, 128, 1);
+}
+
+.footerItem {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.footerLabel {
+  display: none;
+}
+
+.footerValue {
+  font-weight: 500;
+  color: rgba(209, 213, 219, 1);
+}
+
+@media (min-width: 640px) {
+  .footerLabel {
+    display: inline;
+  }
+}
+
+/* Container ID Section */
+.containerIdSection {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.containerId {
+  font-size: 0.625rem;
+  color: rgba(75, 85, 99, 1);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Grid Layout - Responsive Grid (no scroll, shows all) */
+.containersGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  width: 100%;
+}
+
+/* Header Section */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.sectionTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sectionTitleIcon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: rgb(96, 165, 250);
+}
+
+.sectionCount {
+  font-size: 0.875rem;
+  font-weight: normal;
+  color: rgba(156, 163, 175, 1);
+  margin-left: 0.5rem;
+}
+
+.sectionUpdateTime {
+  font-size: 0.75rem;
+  color: rgba(107, 114, 128, 1);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.updateIcon {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+/* Error State */
+.errorMessage {
+  padding: 1rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 0.5rem;
+  color: rgb(248, 113, 113);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.errorIcon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Loading State */
+.loadingContainer {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.loadingTitle {
+  height: 2rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.25rem;
+  width: 25%;
+}
+
+.loadingGrid {
+  display: grid;
+  grid-template-columns: repeat(1, 1fr);
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .loadingGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .loadingGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.loadingCard {
+  height: 12rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Utility Classes */
+.sectionSpacing {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+

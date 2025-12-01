@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: AncientReport-clickhouse
+    ports:
+      - "6123:8123"
+      - "6001:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      TZ: Asia/Tehran
+      CLICKHOUSE_DB: AncientReport
+      CLICKHOUSE_USER: AncientReport
+      CLICKHOUSE_PASSWORD: AncientReport
+    networks:
+      - AncientReport
+
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: AncientReport-agent
+    network_mode: host
+    pid: "host"  # Required to see host processes, not container processes
+    privileged: true  # Required for eBPF
+    environment:
+      TZ: Asia/Tehran
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /proc:/host/proc:ro
+      # Mount config directory instead of file to avoid Docker creating a directory
+      - ./agent:/etc/AncientReport/config-source:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount timezone files to ensure correct time
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - clickhouse
+    restart: unless-stopped
+
+  # Python analysis engine
+  analysis:
+    build:
+      context: ./analysis
+      dockerfile: Dockerfile
+    container_name: AncientReport-analysis
+    ports:
+      - "6800:8800"
+    environment:
+      TZ: Asia/Tehran
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: AncientReport
+      CLICKHOUSE_USER: AncientReport
+      CLICKHOUSE_PASSWORD: AncientReport
+      GEMINI_API_KEY: AIzaSyBPVfd9gaxGvc0FWZzcruZghvWa7MCTcJQ
+      AI_PROVIDER: google
+      AI_MODEL: gemini-2.5-flash-lite
+    depends_on:
+      - clickhouse
+    networks:
+      - AncientReport
+    restart: unless-stopped
+
+  # React frontend (optional)
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: AncientReport-ui
+    ports:
+      - "6080:3000"
+    environment:
+      TZ: Asia/Tehran
+      REACT_APP_API_URL: http://localhost:8000
+    depends_on:
+      - analysis
+    networks:
+      - AncientReport
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+
+networks:
+  AncientReport:
+    driver: bridge

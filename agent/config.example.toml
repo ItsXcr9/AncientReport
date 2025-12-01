@@ -1,0 +1,19 @@
+[agent]
+hostname = "auto-detect"
+collection_interval = "10s"
+
+[clickhouse]
+url = "http://localhost:6123"
+database = "AncientReport"
+username = "AncientReport"
+password = "AncientReport"
+
+[ai]
+provider = "google"  # Options: anthropic, openai, google
+api_key = ""  # Set your API key here or use env var GEMINI_API_KEY
+model = "gemini-2.5-flash-lite"
+
+[alerts]
+# telegram_token = "your-bot-token"
+# telegram_chat_id = "your-chat-id"
+# slack_webhook = "https://hooks.slack.com/services/..."

@@ -1,0 +1,61 @@
+[package]
+name = "AncientReport-agent"
+version = "1.0.0"
+edition = "2021"
+authors = ["AncientReport Team"]
+description = "Low-overhead eBPF-based system monitoring agent"
+license = "Apache-2.0"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full", "rt-multi-thread", "macros"] }
+tokio-util = "0.7"
+
+# eBPF support
+libbpf-rs = "0.23"
+libbpf-sys = "1.4"
+
+# System metrics
+sysinfo = "0.30"
+procfs = "0.16"
+
+# Database
+clickhouse = "0.11"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+humantime-serde = "1.1"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Configuration
+config = "0.14"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+hostname = "0.3"
+
+[build-dependencies]
+libbpf-cargo = "0.23"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
