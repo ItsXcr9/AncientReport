@@ -146,20 +146,57 @@ function App() {
   const triggerAnalysis = async () => {
     try {
       setReportLoading(true)
+      console.log('Triggering analysis...', {
+        browser: navigator.userAgent,
+        timestamp: new Date().toISOString()
+      })
+      
       const res = await fetch('/api/analysis/trigger/hourly', { method: 'POST' })
+      
+      console.log('Analysis trigger response:', {
+        status: res.status,
+        statusText: res.statusText,
+        ok: res.ok,
+        headers: Object.fromEntries(res.headers.entries())
+      })
+      
       if (!res.ok) {
-        throw new Error('Failed to trigger analysis')
+        const errorText = await res.text()
+        console.error('Analysis trigger failed:', {
+          status: res.status,
+          statusText: res.statusText,
+          body: errorText
+        })
+        throw new Error(`Failed to trigger analysis: ${res.status} ${res.statusText}`)
       }
+      
       const data = await res.json()
+      console.log('Analysis trigger response data:', {
+        has_report: !!data.report,
+        has_status: !!data.status,
+        report_keys: data.report ? Object.keys(data.report) : [],
+        ai_insights: data.report?.ai_insights ? {
+          has_recommendations: !!data.report.ai_insights.recommendations,
+          recommendations_count: Array.isArray(data.report.ai_insights.recommendations) ? data.report.ai_insights.recommendations.length : 'N/A',
+          recommendations_type: typeof data.report.ai_insights.recommendations
+        } : null
+      })
+      
       if (data.report) {
         setReport(data.report)
       } else {
         // Fetch the latest report after a short delay
+        console.log('No report in response, fetching latest report in 2 seconds...')
         setTimeout(fetchLatestReport, 2000)
       }
       alert('Analysis triggered successfully!')
     } catch (error) {
-      alert('Failed to trigger analysis')
+      console.error('Analysis trigger error:', error, {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      })
+      alert(`Failed to trigger analysis: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setReportLoading(false)
     }
@@ -443,49 +480,106 @@ function App() {
                     </div>
                   )}
 
-                  {report.ai_insights?.recommendations && report.ai_insights.recommendations.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      <h4 className="font-medium text-sm mb-2">AI Recommendations</h4>
-                      {report.ai_insights.recommendations.slice(0, 5).map((rec, i) => {
-                        // Handle different formats: string, object with action/details, or object with title/description
-                        let action = '';
-                        let details = '';
-                        let priority = 'medium';
-                        
-                        if (typeof rec === 'string') {
-                          action = rec;
-                        } else if (typeof rec === 'object' && rec !== null) {
-                          // Try action/details format first (from Python analysis)
-                          action = rec.action || rec.title || '';
-                          details = rec.details || rec.description || '';
-                          priority = (rec.priority || 'medium').toLowerCase();
+                  {(() => {
+                    try {
+                      const recommendations = report.ai_insights?.recommendations;
+                      
+                      // Validate recommendations array
+                      if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
+                        if (report.ai_insights) {
+                          console.log('No recommendations available:', {
+                            has_ai_insights: !!report.ai_insights,
+                            recommendations_type: typeof recommendations,
+                            recommendations_is_array: Array.isArray(recommendations),
+                            recommendations_length: Array.isArray(recommendations) ? recommendations.length : 'N/A',
+                            recommendations_value: recommendations
+                          });
                         }
-                        
                         return (
-                          <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
-                            <div className="flex items-start gap-2">
-                              <span className={`font-bold ${
-                                priority === 'high' ? 'text-red-400' :
-                                priority === 'medium' ? 'text-yellow-400' :
-                                'text-blue-400'
-                              }`}>#{i + 1}</span>
-                              <div className="flex-1">
-                                {action && <p className="text-sm font-medium text-gray-200">{action}</p>}
-                                {details && details !== action && (
-                                  <p className="text-xs text-gray-400 mt-1">{details}</p>
-                                )}
-                              </div>
-                            </div>
+                          <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
+                            No AI recommendations available yet.
                           </div>
                         );
-                      })}
-                    </div>
-                  )}
-                  {(!report.ai_insights?.recommendations || report.ai_insights.recommendations.length === 0) && report.ai_insights && (
-                    <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
-                      No AI recommendations available yet.
-                    </div>
-                  )}
+                      }
+                      
+                      console.log(`Rendering ${recommendations.length} recommendations`);
+                      
+                      return (
+                        <div className="mt-4 space-y-2">
+                          <h4 className="font-medium text-sm mb-2">AI Recommendations</h4>
+                          {recommendations.slice(0, 5).map((rec, i) => {
+                            try {
+                              // Handle different formats: string, object with action/details, or object with title/description
+                              let action = '';
+                              let details = '';
+                              let priority = 'medium';
+                              
+                              if (typeof rec === 'string') {
+                                action = rec;
+                                details = rec;
+                              } else if (typeof rec === 'object' && rec !== null) {
+                                // Try multiple possible formats
+                                action = rec.title || rec.action || rec.name || '';
+                                details = rec.description || rec.details || rec.explanation || action || '';
+                                priority = (rec.priority || 'medium').toLowerCase();
+                                
+                                // Validate priority
+                                if (!['high', 'medium', 'low'].includes(priority)) {
+                                  priority = 'medium';
+                                }
+                              } else {
+                                console.warn(`Unexpected recommendation format at index ${i}:`, typeof rec, rec);
+                                action = String(rec || 'Unknown recommendation');
+                                details = action;
+                              }
+                              
+                              // Ensure we have at least a title
+                              if (!action && details) {
+                                action = details.substring(0, 80);
+                              } else if (!action) {
+                                action = `Recommendation ${i + 1}`;
+                              }
+                              
+                              return (
+                                <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
+                                  <div className="flex items-start gap-2">
+                                    <span className={`font-bold ${
+                                      priority === 'high' ? 'text-red-400' :
+                                      priority === 'medium' ? 'text-yellow-400' :
+                                      'text-blue-400'
+                                    }`}>#{i + 1}</span>
+                                    <div className="flex-1">
+                                      {action && <p className="text-sm font-medium text-gray-200">{action}</p>}
+                                      {details && details !== action && (
+                                        <p className="text-xs text-gray-400 mt-1">{details}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            } catch (error) {
+                              console.error(`Error rendering recommendation ${i}:`, error, rec);
+                              return (
+                                <div key={i} className="p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-red-400 text-sm">
+                                  Error displaying recommendation {i + 1}
+                                </div>
+                              );
+                            }
+                          })}
+                        </div>
+                      );
+                    } catch (error) {
+                      console.error('Error rendering recommendations section:', error, {
+                        ai_insights: report.ai_insights,
+                        recommendations: report.ai_insights?.recommendations
+                      });
+                      return (
+                        <div className="mt-4 p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-center text-red-400 text-sm">
+                          Error loading recommendations. Please check the console for details.
+                        </div>
+                      );
+                    }
+                  })()}
                 </>
               ) : (
                 <div className="p-4 text-center text-gray-400">

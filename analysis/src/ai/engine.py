@@ -112,16 +112,50 @@ PROVIDE:
 3. Capacity Forecast Assessment (weeks until resource exhaustion)
 4. Configuration Optimizations (specific parameters with values and impact)
 
-Format as JSON with these keys:
+CRITICAL: You MUST respond with ONLY valid JSON. No markdown code blocks, no explanations, no extra text before or after the JSON.
+
+REQUIRED JSON FORMAT (strict schema):
 {{
-  "critical_alerts": [...],
-  "recommendations": [...],
-  "capacity_forecast": {{...}},
-  "config_optimizations": [...]
+  "critical_alerts": ["string1", "string2"],
+  "recommendations": [
+    {{
+      "title": "Short recommendation title",
+      "description": "Detailed explanation of the recommendation with specific actions and expected impact",
+      "priority": "high|medium|low"
+    }}
+  ],
+  "capacity_forecast": {{
+    "cpu_weeks_until_80_percent": 12,
+    "memory_weeks_until_80_percent": 8,
+    "needs_upgrade": false,
+    "recommended_action": "monitor|upgrade|optimize"
+  }},
+  "config_optimizations": [
+    {{
+      "parameter": "parameter_name",
+      "current_value": "current",
+      "recommended_value": "recommended",
+      "impact": "description of expected impact"
+    }}
+  ]
+}}
+
+RECOMMENDATIONS FORMAT REQUIREMENTS:
+- Each recommendation MUST be an object with exactly these keys: "title", "description", "priority"
+- "title": Short, actionable title (max 80 characters)
+- "description": Detailed explanation with specific steps, numbers, and expected impact (2-4 sentences)
+- "priority": Must be exactly one of: "high", "medium", or "low" (lowercase)
+
+EXAMPLE RECOMMENDATION:
+{{
+  "title": "Optimize MySQL query cache",
+  "description": "Current query_cache_size is 0MB. Increase to 256MB to cache frequent SELECT queries. Expected impact: 15-20% reduction in database load and 30-50ms faster response times for cached queries.",
+  "priority": "medium"
 }}
 
 Be concise, technical, and focus on actionable insights.
 Use specific numbers and timeframes. Explain the "why" behind each recommendation.
+Return ONLY the JSON object, nothing else.
 """
         return prompt
     

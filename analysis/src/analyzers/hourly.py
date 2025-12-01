@@ -304,35 +304,55 @@ class HourlyAnalyzer:
         }
     
     def _extract_json_from_response(self, response: str) -> str:
-        """Extract JSON from AI response, handling various formats"""
+        """Extract JSON from AI response, handling various formats including nested structures"""
         # Remove leading/trailing whitespace
         cleaned = response.strip()
         
-        # Try to find JSON object using regex (handles cases where there's extra text)
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned, re.DOTALL)
-        if json_match:
-            cleaned = json_match.group(0)
+        # First, try to remove markdown code blocks (most common case)
+        # Handle ```json ... ``` or ``` ... ```
+        markdown_pattern = r'```(?:json)?\s*(.*?)\s*```'
+        markdown_match = re.search(markdown_pattern, cleaned, re.DOTALL)
+        if markdown_match:
+            cleaned = markdown_match.group(1).strip()
         
-        # Remove markdown code blocks
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        elif cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        
-        # Remove any leading text before first {
+        # Find the first { and last } to extract the JSON object
+        # Use a balanced bracket approach to handle nested structures
         first_brace = cleaned.find('{')
-        if first_brace > 0:
-            cleaned = cleaned[first_brace:]
+        if first_brace == -1:
+            logger.warning("No opening brace found in response")
+            return cleaned
         
-        # Remove any trailing text after last }
-        last_brace = cleaned.rfind('}')
-        if last_brace >= 0 and last_brace < len(cleaned) - 1:
-            cleaned = cleaned[:last_brace + 1]
+        # Count braces to find the matching closing brace
+        brace_count = 0
+        last_brace = first_brace
+        for i in range(first_brace, len(cleaned)):
+            if cleaned[i] == '{':
+                brace_count += 1
+            elif cleaned[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    last_brace = i
+                    break
         
-        return cleaned.strip()
+        if brace_count != 0:
+            logger.warning(f"Unbalanced braces in response (count: {brace_count}), attempting fallback extraction")
+            # Fallback: find last } after first {
+            last_brace = cleaned.rfind('}')
+            if last_brace <= first_brace:
+                logger.error("Could not find valid JSON boundaries")
+                return cleaned
+        
+        # Extract the JSON portion
+        json_str = cleaned[first_brace:last_brace + 1]
+        
+        # Clean up any remaining whitespace
+        json_str = json_str.strip()
+        
+        # Validate it looks like JSON (starts with { and ends with })
+        if not (json_str.startswith('{') and json_str.endswith('}')):
+            logger.warning("Extracted string doesn't look like valid JSON, returning as-is")
+        
+        return json_str
     
     def _validate_ai_insights(self, insights: Dict) -> Dict:
         """Validate and normalize AI insights structure"""
@@ -348,36 +368,93 @@ class HourlyAnalyzer:
         
         # Ensure recommendations is always a list of proper format
         if "recommendations" not in insights:
+            logger.warning("recommendations key missing from AI insights, initializing as empty list")
             insights["recommendations"] = []
         elif not isinstance(insights["recommendations"], list):
+            logger.warning(f"recommendations is not a list (type: {type(insights['recommendations'])}), initializing as empty list")
             insights["recommendations"] = []
         else:
             # Normalize recommendations to objects with title/description/priority
             normalized_recommendations = []
-            for rec in insights["recommendations"]:
-                if isinstance(rec, dict):
-                    # Already an object, ensure it has required fields
-                    normalized_rec = {
-                        "title": rec.get("title", rec.get("description", str(rec))),
-                        "description": rec.get("description", rec.get("title", str(rec))),
-                        "priority": rec.get("priority", "medium")
-                    }
-                    normalized_recommendations.append(normalized_rec)
-                elif isinstance(rec, str):
-                    # String format, convert to object
-                    normalized_recommendations.append({
-                        "title": rec,
-                        "description": rec,
-                        "priority": "medium"
-                    })
-                else:
-                    # Unknown format, convert to string
-                    normalized_recommendations.append({
-                        "title": str(rec),
-                        "description": str(rec),
-                        "priority": "medium"
-                    })
+            original_count = len(insights["recommendations"])
+            logger.info(f"Normalizing {original_count} recommendations")
+            
+            for idx, rec in enumerate(insights["recommendations"]):
+                try:
+                    if isinstance(rec, dict):
+                        # Already an object, ensure it has required fields
+                        # Try multiple possible key names for title/description
+                        title = rec.get("title") or rec.get("action") or rec.get("name") or ""
+                        description = rec.get("description") or rec.get("details") or rec.get("explanation") or title or str(rec)
+                        priority = rec.get("priority", "medium")
+                        
+                        # Normalize priority to lowercase and validate
+                        if isinstance(priority, str):
+                            priority = priority.lower()
+                            if priority not in ["high", "medium", "low"]:
+                                logger.warning(f"Invalid priority '{priority}' for recommendation {idx}, defaulting to 'medium'")
+                                priority = "medium"
+                        else:
+                            priority = "medium"
+                        
+                        # Ensure title and description are strings
+                        if not title:
+                            title = description[:80] if description else f"Recommendation {idx + 1}"
+                        
+                        normalized_rec = {
+                            "title": str(title),
+                            "description": str(description),
+                            "priority": priority
+                        }
+                        normalized_recommendations.append(normalized_rec)
+                        logger.debug(f"Normalized recommendation {idx + 1}: title='{title[:50]}...', priority={priority}")
+                        
+                    elif isinstance(rec, str):
+                        # String format, convert to object
+                        rec_str = rec.strip()
+                        if rec_str:
+                            # Try to split into title and description if it contains newlines
+                            parts = rec_str.split('\n', 1)
+                            title = parts[0].strip()[:80]  # Limit title length
+                            description = parts[1].strip() if len(parts) > 1 else rec_str
+                            
+                            normalized_recommendations.append({
+                                "title": title,
+                                "description": description,
+                                "priority": "medium"
+                            })
+                            logger.debug(f"Converted string recommendation {idx + 1} to object")
+                        else:
+                            logger.warning(f"Skipping empty string recommendation at index {idx}")
+                    else:
+                        # Unknown format, convert to string
+                        rec_str = str(rec).strip()
+                        if rec_str:
+                            normalized_recommendations.append({
+                                "title": rec_str[:80],
+                                "description": rec_str,
+                                "priority": "medium"
+                            })
+                            logger.warning(f"Converted unknown format recommendation {idx + 1} (type: {type(rec)}) to object")
+                        else:
+                            logger.warning(f"Skipping empty recommendation at index {idx} (type: {type(rec)})")
+                            
+                except Exception as e:
+                    logger.error(f"Error normalizing recommendation {idx}: {e}", exc_info=True)
+                    # Skip this recommendation but continue processing others
+                    continue
+            
             insights["recommendations"] = normalized_recommendations
+            logger.info(f"Successfully normalized {len(normalized_recommendations)}/{original_count} recommendations")
+            
+            # Filter out any recommendations with empty titles
+            before_filter = len(insights["recommendations"])
+            insights["recommendations"] = [
+                rec for rec in insights["recommendations"] 
+                if rec.get("title") and rec.get("title").strip()
+            ]
+            if len(insights["recommendations"]) < before_filter:
+                logger.warning(f"Filtered out {before_filter - len(insights['recommendations'])} recommendations with empty titles")
         
         # Ensure capacity_forecast is always a dict
         if "capacity_forecast" not in insights:
@@ -400,52 +477,104 @@ class HourlyAnalyzer:
         """Generate AI insights with robust JSON parsing"""
         try:
             prompt = self.ai.build_analysis_prompt(context)
+            logger.debug(f"Generated prompt length: {len(prompt)} characters")
+            
             response = await self.ai.generate_insights(prompt)
             
-            logger.info(f"Raw AI response (first 500 chars): {response[:500]}")
+            logger.info(f"Raw AI response received (length: {len(response)} chars)")
+            logger.debug(f"Raw AI response (first 500 chars): {response[:500]}")
+            if len(response) > 500:
+                logger.debug(f"Raw AI response (last 200 chars): {response[-200:]}")
             
             # Extract JSON from response
             cleaned_response = self._extract_json_from_response(response)
             
+            logger.info(f"Cleaned response length: {len(cleaned_response)} chars")
             logger.debug(f"Cleaned response (first 500 chars): {cleaned_response[:500]}")
+            if len(cleaned_response) > 500:
+                logger.debug(f"Cleaned response (last 200 chars): {cleaned_response[-200:]}")
             
             # Try to parse JSON
             try:
                 insights = json.loads(cleaned_response)
+                logger.info("Successfully parsed JSON from AI response")
             except json.JSONDecodeError as e:
-                logger.warning(f"JSON parsing failed, attempting fallback extraction: {e}")
-                # Try regex-based extraction of critical_alerts
+                logger.error(f"JSON parsing failed: {e}")
+                logger.error(f"JSON error position: line {e.lineno}, column {e.colno}")
+                logger.error(f"Problematic JSON snippet: {cleaned_response[max(0, e.pos-50):e.pos+50]}")
+                
+                # Try regex-based extraction of critical_alerts as fallback
+                logger.warning("Attempting fallback extraction of critical_alerts")
                 alerts_match = re.search(r'"critical_alerts"\s*:\s*\[(.*?)\]', cleaned_response, re.DOTALL)
-                if alerts_match:
-                    # Try to extract individual alert strings
-                    alerts_text = alerts_match.group(1)
-                    alerts = re.findall(r'"([^"]+)"', alerts_text)
+                recommendations_match = re.search(r'"recommendations"\s*:\s*\[(.*?)\]', cleaned_response, re.DOTALL)
+                
+                if alerts_match or recommendations_match:
+                    alerts = []
+                    if alerts_match:
+                        alerts_text = alerts_match.group(1)
+                        alerts = re.findall(r'"([^"]+)"', alerts_text)
+                        logger.info(f"Extracted {len(alerts)} alerts using fallback method")
+                    
+                    recommendations = []
+                    if recommendations_match:
+                        # Try to extract recommendation objects
+                        recs_text = recommendations_match.group(1)
+                        # Look for objects with title/description
+                        rec_objects = re.findall(r'\{(.*?)\}', recs_text, re.DOTALL)
+                        for rec_obj in rec_objects:
+                            title_match = re.search(r'"title"\s*:\s*"([^"]+)"', rec_obj)
+                            desc_match = re.search(r'"description"\s*:\s*"([^"]+)"', rec_obj)
+                            priority_match = re.search(r'"priority"\s*:\s*"([^"]+)"', rec_obj)
+                            if title_match or desc_match:
+                                recommendations.append({
+                                    "title": title_match.group(1) if title_match else (desc_match.group(1)[:80] if desc_match else "Recommendation"),
+                                    "description": desc_match.group(1) if desc_match else (title_match.group(1) if title_match else ""),
+                                    "priority": priority_match.group(1).lower() if priority_match else "medium"
+                                })
+                        logger.info(f"Extracted {len(recommendations)} recommendations using fallback method")
+                    
                     insights = {
                         "critical_alerts": alerts,
-                        "recommendations": [],
+                        "recommendations": recommendations,
                         "capacity_forecast": {},
                         "config_optimizations": []
                     }
-                    logger.info(f"Extracted {len(alerts)} alerts using fallback method")
+                    logger.warning(f"Using fallback extraction - alerts: {len(alerts)}, recommendations: {len(recommendations)}")
                 else:
+                    logger.error("Fallback extraction also failed, no patterns found in response")
                     raise
             
             # Validate and normalize structure
+            logger.info("Validating and normalizing AI insights structure")
             insights = self._validate_ai_insights(insights)
             
-            # Log the parsed structure
-            logger.info(f"Parsed AI insights - critical_alerts: {len(insights.get('critical_alerts', []))}, "
-                       f"recommendations: {len(insights.get('recommendations', []))}")
+            # Log the parsed structure with details
+            logger.info(f"Successfully parsed AI insights:")
+            logger.info(f"  - critical_alerts: {len(insights.get('critical_alerts', []))} items")
+            logger.info(f"  - recommendations: {len(insights.get('recommendations', []))} items")
+            logger.info(f"  - capacity_forecast: {bool(insights.get('capacity_forecast'))}")
+            logger.info(f"  - config_optimizations: {len(insights.get('config_optimizations', []))} items")
+            
             if insights.get('critical_alerts'):
                 logger.info(f"Critical alerts: {insights['critical_alerts']}")
+            
+            if insights.get('recommendations'):
+                for idx, rec in enumerate(insights['recommendations'][:3]):  # Log first 3
+                    logger.debug(f"Recommendation {idx + 1}: title='{rec.get('title', 'N/A')[:50]}', priority={rec.get('priority', 'N/A')}")
             
             return insights
             
         except Exception as e:
             logger.error(f"Failed to generate AI insights: {e}", exc_info=True)
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception args: {e.args}")
             return {
                 "critical_alerts": [],
-                "recommendations": ["AI analysis unavailable"],
+                "recommendations": [{
+                    "title": "AI analysis unavailable",
+                    "description": f"Error: {str(e)[:200]}",
+                    "priority": "high"
+                }],
                 "capacity_forecast": {},
                 "config_optimizations": []
             }
