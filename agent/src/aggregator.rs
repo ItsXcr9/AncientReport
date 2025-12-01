@@ -87,7 +87,6 @@ impl MetricAggregator {
             self.clickhouse_pass.clone()
         );
         let rows: Vec<MetricRow> = self.buffer.iter().map(|m| {
-        let rows: Vec<MetricRow> = self.buffer.iter().map(|m| {
             MetricRow {
                 timestamp: m.timestamp,
                 hostname: m.hostname.clone(),

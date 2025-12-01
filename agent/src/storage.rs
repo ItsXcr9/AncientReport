@@ -6,7 +6,7 @@ use tracing::{debug, error, info};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricRow {
-    pub timestamp: String,
+    pub timestamp: i64,
     pub hostname: String,
     pub metric_type: String,
     pub metric_name: String,

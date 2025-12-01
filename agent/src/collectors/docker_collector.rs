@@ -251,21 +251,28 @@ impl DockerCollector {
         }
     }
 
-    fn parse_docker_timestamp(&self, timestamp: &str) -> String {
-        // Docker format: "2025-12-01 11:52:41 +0000 UTC" or "2025-12-01 11:52:41.123456 +0000 UTC"
-        // ClickHouse format: "2025-12-01 11:52:41"
+    fn parse_docker_timestamp(&self, timestamp: &str) -> i64 {
+        // Docker format: "2025-12-01 11:52:41 +0000 UTC"
+        // Try to parse with chrono to get Unix timestamp
         
-        // Split by space and take first two parts (date and time)
+        // Clean up timestamp string (remove microseconds if present to simplify parsing)
         let parts: Vec<&str> = timestamp.split_whitespace().collect();
-        if parts.len() >= 2 {
-            // Take date and time, ignore timezone
+        if parts.len() >= 4 {
             let date = parts[0];
-            let time = parts[1].split('.').next().unwrap_or(parts[1]); // Remove microseconds if present
-            format!("{} {}", date, time)
-        } else {
-            // Fallback: use current time if parsing fails
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+            let time = parts[1].split('.').next().unwrap_or(parts[1]);
+            let tz_offset = parts[2];
+            let clean_ts = format!("{} {} {}", date, time, tz_offset);
+            
+            if let Ok(dt) = chrono::DateTime::parse_from_str(&clean_ts, "%Y-%m-%d %H:%M:%S %z") {
+                return dt.timestamp();
+            }
         }
+
+        // Fallback: current system time
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
     }
 
     fn get_restart_count(&self, container_id: &str) -> Result<u32, Box<dyn std::error::Error>> {
@@ -301,7 +308,10 @@ impl DockerCollector {
         -> Result<(), Box<dyn std::error::Error>> {
         
         let client = reqwest::Client::new();
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
 
         for container in containers {
             let query = format!(

@@ -271,6 +271,9 @@ async def get_cpu_metrics(start: str = None, end: str = None):
         # Pass Tehran time directly (ClickHouse client handles timestamp conversion)
         data = await clickhouse_client.get_metrics_raw(start_time, end_time, "cpu_usage_percent")
         
+        if data and len(data) > 0:
+            logger.info(f"DEBUG: Raw timestamp from driver: {data[0][0]} (type: {type(data[0][0])})")
+            
         logger.debug(f"Retrieved {len(data)} CPU metric rows from {start_time} to {end_time}")
         
         # Format for frontend - convert UTC timestamps back to Tehran timezone for display

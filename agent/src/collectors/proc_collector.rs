@@ -48,7 +48,10 @@ impl ProcCollector {
         // Refresh system information
         self.system.refresh_all();
 
-        let timestamp = chrono::Local::now().timestamp();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let mut tags = HashMap::new();
         tags.insert("source".to_string(), "proc".to_string());
 
