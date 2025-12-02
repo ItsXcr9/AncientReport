@@ -19,9 +19,14 @@ interface Container {
   restart_count: number;
   created_at: string;
   last_seen: string;
+  hostname: string;
 }
 
-export const DockerContainers: React.FC = () => {
+interface DockerContainersProps {
+  selectedServer: string | null;
+}
+
+export const DockerContainers: React.FC<DockerContainersProps> = ({ selectedServer }) => {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +115,7 @@ export const DockerContainers: React.FC = () => {
           <Box className={styles.sectionTitleIcon} />
           Docker Containers
           <span className={styles.sectionCount}>
-            ({containers.length} total, {containers.filter(c => c.status === 'running').length} running)
+            ({containers.filter(c => !selectedServer || c.hostname === selectedServer).length} total, {containers.filter(c => (!selectedServer || c.hostname === selectedServer) && c.status === 'running').length} running)
           </span>
         </h2>
         <div className={styles.sectionUpdateTime}>
@@ -134,7 +139,9 @@ export const DockerContainers: React.FC = () => {
 
       {containers.length > 0 && (
         <div className={styles.containersGrid}>
-          {containers.map(container => (
+          {containers
+            .filter(container => !selectedServer || container.hostname === selectedServer)
+            .map(container => (
             <div 
               key={container.id}
               className={`${styles.containerCard} ${

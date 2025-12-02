@@ -8,6 +8,7 @@ import { DockerContainers } from './components/DockerContainers';
 import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 
 import ServerSelector from './components/ServerSelector';
+import { ServerInfoCard } from './components/ServerInfoCard'
 
 interface SystemHealth {
   status: string
@@ -68,6 +69,7 @@ function App() {
   const [isTriggering, setIsTriggering] = useState(false)
   const [servers, setServers] = useState<string[]>([])
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
+  const [serverInfo, setServerInfo] = useState<any>(null)
 
   useEffect(() => {
     fetchServers()
@@ -92,6 +94,13 @@ function App() {
       if (res.ok) {
         const data = await res.json()
         setServers(data.servers || [])
+      }
+      
+      // Also fetch server info for the summary view
+      const infoRes = await fetch('/api/servers/info')
+      if (infoRes.ok) {
+        const infoData = await infoRes.json()
+        setServerInfo(infoData.servers || {})
       }
     } catch (error) {
       console.error('Failed to fetch servers:', error)
@@ -340,6 +349,12 @@ function App() {
 
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
+        {/* Server Info Card */}
+        {selectedServer && (
+          <div className="mb-6">
+            <ServerInfoCard selectedServer={selectedServer} />
+          </div>
+        )}
         {/* Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <StatusCard
@@ -402,384 +417,472 @@ function App() {
                 </button>
               </div>
             </div>
-            <div className="space-y-4 relative">
-              {isTriggering && (
-                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm rounded-lg z-10 flex items-center justify-center">
-                  <div className="bg-white/10 rounded-lg p-6 border border-white/20">
-                    <div className="flex flex-col items-center gap-3">
-                      <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
-                      <p className="text-sm font-medium text-gray-200">Triggering Analysis...</p>
-                      <p className="text-xs text-gray-400">This may take a few moments</p>
+            
+            {!selectedServer ? (
+              // All Servers View
+              <div className="space-y-6">
+                {/* General Information Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                    <div className="text-gray-400 text-sm mb-1">Total Servers</div>
+                    <div className="text-2xl font-bold flex items-center gap-2">
+                      <Server className="w-5 h-5 text-blue-400" />
+                      {servers.length}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                    <div className="text-gray-400 text-sm mb-1">Total CPU Cores</div>
+                    <div className="text-2xl font-bold flex items-center gap-2">
+                      <Cpu className="w-5 h-5 text-purple-400" />
+                      {serverInfo ? Object.values(serverInfo).reduce((acc: number, s: any) => acc + (s.cpu_cores || 0), 0) : '-'}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                    <div className="text-gray-400 text-sm mb-1">Total Memory</div>
+                    <div className="text-2xl font-bold flex items-center gap-2">
+                      <Database className="w-5 h-5 text-green-400" />
+                      {serverInfo ? Object.values(serverInfo).reduce((acc: number, s: any) => acc + (s.memory_total_gb || 0), 0).toFixed(0) : '-'} GB
+                    </div>
+                  </div>
+                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                    <div className="text-gray-400 text-sm mb-1">Total Storage</div>
+                    <div className="text-2xl font-bold flex items-center gap-2">
+                      <Database className="w-5 h-5 text-yellow-400" />
+                      {serverInfo ? Object.values(serverInfo).reduce((acc: number, s: any) => acc + (s.disk_total_gb || 0), 0).toFixed(0) : '-'} GB
                     </div>
                   </div>
                 </div>
-              )}
-              {reportLoading && !isTriggering ? (
-                <div className="p-4 text-center text-gray-400">Loading report...</div>
-              ) : report ? (
-                <>
-                  <div className="p-4 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className={`w-5 h-5 mt-1 ${
-                        report.system_health.status === 'excellent' ? 'text-green-400' :
-                        report.system_health.status === 'healthy' ? 'text-blue-400' :
-                        report.system_health.status === 'warning' ? 'text-yellow-400' :
-                        'text-red-400'
-                      }`} />
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <h3 className="font-medium">System Health: {report.system_health.overall_score}/100</h3>
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            report.system_health.status === 'excellent' ? 'bg-green-500/20 text-green-400' :
-                            report.system_health.status === 'healthy' ? 'bg-blue-500/20 text-blue-400' :
-                            report.system_health.status === 'warning' ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-red-500/20 text-red-400'
-                          }`}>
-                            {report.system_health.status}
-                          </span>
-                        </div>
-                        <p className="text-sm text-gray-400">
-                          Report ID: {report.report_id ? new Date(report.report_id).toLocaleString() : 'N/A'}
-                        </p>
-                        {report.system_health.pressure_points && report.system_health.pressure_points.length > 0 && (
-                          <p className="text-xs text-yellow-400 mt-1">
-                            Pressure points: {report.system_health.pressure_points.join(', ')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
 
-
-                  {(() => {
-                    const alerts = report.ai_insights?.critical_alerts;
-                    const hasAlerts = Array.isArray(alerts) && alerts.length > 0;
-                    if (hasAlerts) {
-                      return (
-                        <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20">
-                          <h4 className="font-medium text-red-400 mb-2">Critical Alerts</h4>
-                          <ul className="text-sm text-gray-300 space-y-1">
-                            {alerts.map((alert, i) => (
-                              <li key={i}>• {String(alert)}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {/* AI Hourly Summary - New Section */}
-                  {report.ai_insights && (
-                    <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20">
-                      <h4 className="font-medium text-purple-400 mb-3 flex items-center gap-2">
-                        <Brain className="w-4 h-4" />
-                        AI System Summary (Past Hour)
-                      </h4>
-                      <div className="space-y-3 text-sm text-gray-300">
-                        {report.ai_insights.critical_alerts && report.ai_insights.critical_alerts.length > 0 ? (
-                          <p className="text-yellow-300">
-                            ⚠️ System has {report.ai_insights.critical_alerts.length} critical alert(s) requiring attention.
-                          </p>
-                        ) : (
-                          <p className="text-green-300">
-                            ✓ No critical issues detected in the past hour.
-                          </p>
-                        )}
-                        
-                        <div>
-                          <p className="text-gray-400 text-xs mb-1">Performance Summary:</p>
-                          <p>
-                            CPU averaged {report.resource_usage?.cpu?.average?.toFixed(1)}% with peak at {report.resource_usage?.cpu?.peak?.toFixed(1)}%. 
-                            Memory utilization at {report.resource_usage?.memory?.average?.toFixed(1)}%.
-                            {report.resource_usage?.network?.drops > 0 && (
-                              <span className="text-yellow-300"> Network experienced {report.resource_usage.network.drops} packet drops.</span>
-                            )}
-                          </p>
-                        </div>
-
-                        {report.anomalies && report.anomalies.length > 0 && (
-                          <div>
-                            <p className="text-gray-400 text-xs mb-1">Anomalies Detected:</p>
-                            <p className="text-yellow-300">
-                              {report.anomalies.length} metric(s) deviated from baseline behavior.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <MetricBox 
-                      label="CPU Usage" 
-                      value={`${report.resource_usage?.cpu?.average?.toFixed(1) || 0}%`} 
-                      trend={`Peak: ${report.resource_usage?.cpu?.peak?.toFixed(1) || 0}%`} 
-                    />
-                    <MetricBox 
-                      label="Memory" 
-                      value={`${report.resource_usage?.memory?.average?.toFixed(1) || 0}%`} 
-                      trend={`Peak: ${report.resource_usage?.memory?.peak?.toFixed(1) || 0}%`} 
-                    />
-                    <MetricBox 
-                      label="Disk I/O" 
-                      value={`${((report.resource_usage?.disk_io?.reads_per_sec || 0) + (report.resource_usage?.disk_io?.writes_per_sec || 0)).toFixed(0)} IOPS`} 
-                      trend={`${report.resource_usage?.disk_io?.latency_ms?.toFixed(1) || 0}ms latency`} 
-                    />
-                    <MetricBox 
-                      label="Network" 
-                      value={`${((report.resource_usage?.network?.packets_sent || 0) + (report.resource_usage?.network?.packets_received || 0)).toLocaleString()} packets`} 
-                      trend={`${report.resource_usage?.network?.drops || 0} drops`} 
-                    />
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    <h4 className="font-semibold text-base mb-3 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-blue-400" />
-                      Top Processes (Hourly Summary)
+                {/* Critical Alerts Only */}
+                {report && report.ai_insights?.critical_alerts && report.ai_insights.critical_alerts.length > 0 ? (
+                  <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20">
+                    <h4 className="font-medium text-red-400 mb-2 flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5" />
+                      Critical Alerts Across All Servers
                     </h4>
-                    {report.top_processes ? (
-                      <>
-                        {report.top_processes.cpu && Array.isArray(report.top_processes.cpu) && report.top_processes.cpu.length > 0 && (
-                        <div className="p-4 bg-gradient-to-r from-blue-500/10 to-blue-600/5 rounded-lg border border-blue-500/20">
-                          <h5 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
-                            <Activity className="w-4 h-4" />
-                            Top 3 CPU Consumers
-                          </h5>
-                          <div className="space-y-2">
-                            {report.top_processes.cpu.map((proc, i) => (
-                              <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-blue-400 w-6">#{i + 1}</span>
-                                    <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
-                                    <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-sm font-semibold text-blue-300">{(proc?.average || 0).toFixed(1)}%</span>
-                                    <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)}%</span>
-                                  </div>
-                                </div>
-                                {proc?.command_line && (
-                                  <div className="ml-8 mt-1">
-                                    <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {report.top_processes.memory && Array.isArray(report.top_processes.memory) && report.top_processes.memory.length > 0 && (
-                        <div className="p-4 bg-gradient-to-r from-purple-500/10 to-purple-600/5 rounded-lg border border-purple-500/20">
-                          <h5 className="text-sm font-medium text-purple-400 mb-3 flex items-center gap-2">
-                            <Database className="w-4 h-4" />
-                            Top 3 Memory Consumers
-                          </h5>
-                          <div className="space-y-2">
-                            {report.top_processes.memory.map((proc, i) => (
-                              <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-purple-400 w-6">#{i + 1}</span>
-                                    <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
-                                    <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-sm font-semibold text-purple-300">{(proc?.average || 0).toFixed(1)} MB</span>
-                                    <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
-                                  </div>
-                                </div>
-                                {proc?.command_line && (
-                                  <div className="ml-8 mt-1">
-                                    <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {report.top_processes.disk_io && Array.isArray(report.top_processes.disk_io) && report.top_processes.disk_io.length > 0 && (
-                        <div className="p-4 bg-gradient-to-r from-green-500/10 to-green-600/5 rounded-lg border border-green-500/20">
-                          <h5 className="text-sm font-medium text-green-400 mb-3 flex items-center gap-2">
-                            <Activity className="w-4 h-4" />
-                            Top 3 Disk I/O Consumers
-                          </h5>
-                          <div className="space-y-2">
-                            {report.top_processes.disk_io.map((proc, i) => (
-                              <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-green-400 w-6">#{i + 1}</span>
-                                    <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
-                                    <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-sm font-semibold text-green-300">{(proc?.average || 0).toFixed(1)} MB</span>
-                                    <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
-                                  </div>
-                                </div>
-                                {proc?.command_line && (
-                                  <div className="ml-8 mt-1">
-                                    <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {(!report.top_processes.cpu || !Array.isArray(report.top_processes.cpu) || report.top_processes.cpu.length === 0) && 
-                       (!report.top_processes.memory || !Array.isArray(report.top_processes.memory) || report.top_processes.memory.length === 0) && 
-                       (!report.top_processes.disk_io || !Array.isArray(report.top_processes.disk_io) || report.top_processes.disk_io.length === 0) && (
-                        <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
-                          {report.top_processes ? 
-                            'Top processes data exists but is empty. Process metrics may not be available for the selected time period.' :
-                            'No process data available yet. Wait for the next hourly analysis.'
-                          }
-                        </div>
-                      )}
-                      </>
-                    ) : (
-                      <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
-                        No process data available yet. Wait for the next hourly analysis.
-                      </div>
-                    )}
+                    <ul className="text-sm text-gray-300 space-y-1">
+                      {report.ai_insights.critical_alerts.map((alert, i) => (
+                        <li key={i}>• {String(alert)}</li>
+                      ))}
+                    </ul>
                   </div>
+                ) : (
+                  <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20 text-green-400 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" />
+                    No critical alerts detected across the fleet.
+                  </div>
+                )}
+                
+                <div className="text-center text-sm text-gray-500 mt-4">
+                  Select a specific server to view detailed analysis, health scores, and top processes.
+                </div>
+              </div>
+            ) : (
+              // Single Server View (Existing Logic)
+              <div className="space-y-4 relative">
+                {isTriggering && (
+                  <div className="absolute inset-0 bg-black/50 backdrop-blur-sm rounded-lg z-10 flex items-center justify-center">
+                    <div className="bg-white/10 rounded-lg p-6 border border-white/20">
+                      <div className="flex flex-col items-center gap-3">
+                        <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+                        <p className="text-sm font-medium text-gray-200">Triggering Analysis...</p>
+                        <p className="text-xs text-gray-400">This may take a few moments</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {reportLoading && !isTriggering ? (
+                  <div className="p-4 text-center text-gray-400">Loading report...</div>
+                ) : report ? (
+                  <>
+                    <div className="p-4 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className={`w-5 h-5 mt-1 ${
+                          report.system_health.status === 'excellent' ? 'text-green-400' :
+                          report.system_health.status === 'healthy' ? 'text-blue-400' :
+                          report.system_health.status === 'warning' ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`} />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="font-medium">System Health: {report.system_health.overall_score}/100</h3>
+                            <span className={`text-xs px-2 py-1 rounded ${
+                              report.system_health.status === 'excellent' ? 'bg-green-500/20 text-green-400' :
+                              report.system_health.status === 'healthy' ? 'bg-blue-500/20 text-blue-400' :
+                              report.system_health.status === 'warning' ? 'bg-yellow-500/20 text-yellow-400' :
+                              'bg-red-500/20 text-red-400'
+                            }`}>
+                              {report.system_health.status}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-400">
+                            Report ID: {report.report_id ? new Date(report.report_id).toLocaleString() : 'N/A'}
+                          </p>
+                          {report.system_health.pressure_points && report.system_health.pressure_points.length > 0 && (
+                            <p className="text-xs text-yellow-400 mt-1">
+                              Pressure points: {report.system_health.pressure_points.join(', ')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
-                  {(() => {
-                    try {
-                      const recommendations = report.ai_insights?.recommendations;
-                      
-                      // Validate recommendations array
-                      if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
-                        if (report.ai_insights) {
-                          console.log('No recommendations available:', {
-                            has_ai_insights: !!report.ai_insights,
-                            recommendations_type: typeof recommendations,
-                            recommendations_is_array: Array.isArray(recommendations),
-                            recommendations_length: Array.isArray(recommendations) ? recommendations.length : 'N/A',
-                            recommendations_value: recommendations
-                          });
-                        }
+
+                    {(() => {
+                      const alerts = report.ai_insights?.critical_alerts;
+                      const hasAlerts = Array.isArray(alerts) && alerts.length > 0;
+                      if (hasAlerts) {
                         return (
-                          <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
-                            No AI recommendations available yet.
+                          <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20">
+                            <h4 className="font-medium text-red-400 mb-2">Critical Alerts</h4>
+                            <ul className="text-sm text-gray-300 space-y-1">
+                              {alerts.map((alert, i) => (
+                                <li key={i}>• {String(alert)}</li>
+                              ))}
+                            </ul>
                           </div>
                         );
                       }
-                      
-                      console.log(`Rendering ${recommendations.length} recommendations`);
-                      
-                      return (
-                        <div className="mt-4 space-y-2">
-                          <h4 className="font-medium text-sm mb-2">AI Recommendations</h4>
-                          {recommendations.slice(0, 5).map((rec, i) => {
-                            try {
-                              // Handle different formats: string, object with action/details, or object with title/description
-                              let action = '';
-                              let details = '';
-                              let priority = 'medium';
-                              
-                              if (typeof rec === 'string') {
-                                action = rec;
-                                details = rec;
-                              } else if (typeof rec === 'object' && rec !== null) {
-                                // Try multiple possible formats
-                                action = rec.title || rec.action || rec.name || '';
-                                details = rec.description || rec.details || rec.explanation || action || '';
-                                priority = (rec.priority || 'medium').toLowerCase();
-                                
-                                // Validate priority
-                                if (!['high', 'medium', 'low'].includes(priority)) {
-                                  priority = 'medium';
-                                }
-                              } else {
-                                console.warn(`Unexpected recommendation format at index ${i}:`, typeof rec, rec);
-                                action = String(rec || 'Unknown recommendation');
-                                details = action;
-                              }
-                              
-                              // Ensure we have at least a title
-                              if (!action && details) {
-                                action = details.substring(0, 80);
-                              } else if (!action) {
-                                action = `Recommendation ${i + 1}`;
-                              }
-                              
-                              return (
-                                <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
-                                  <div className="flex items-start gap-2">
-                                    <span className={`font-bold ${
-                                      priority === 'high' ? 'text-red-400' :
-                                      priority === 'medium' ? 'text-yellow-400' :
-                                      'text-blue-400'
-                                    }`}>#{i + 1}</span>
-                                    <div className="flex-1">
-                                      {action && <p className="text-sm font-medium text-gray-200">{action}</p>}
-                                      {details && details !== action && (
-                                        <p className="text-xs text-gray-400 mt-1">{details}</p>
-                                      )}
+                      return null;
+                    })()}
+
+                    {/* AI Hourly Summary - New Section */}
+                    {report.ai_insights && (
+                      <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20">
+                        <h4 className="font-medium text-purple-400 mb-3 flex items-center gap-2">
+                          <Brain className="w-4 h-4" />
+                          AI System Summary (Past Hour)
+                        </h4>
+                        <div className="space-y-3 text-sm text-gray-300">
+                          {report.ai_insights.critical_alerts && report.ai_insights.critical_alerts.length > 0 ? (
+                            <p className="text-yellow-300">
+                              ⚠️ System has {report.ai_insights.critical_alerts.length} critical alert(s) requiring attention.
+                            </p>
+                          ) : (
+                            <p className="text-green-300">
+                              ✓ No critical issues detected in the past hour.
+                            </p>
+                          )}
+                          
+                          <div>
+                            <p className="text-gray-400 text-xs mb-1">Performance Summary:</p>
+                            <p>
+                              CPU averaged {report.resource_usage?.cpu?.average?.toFixed(1)}% with peak at {report.resource_usage?.cpu?.peak?.toFixed(1)}%. 
+                              Memory utilization at {report.resource_usage?.memory?.average?.toFixed(1)}%.
+                              {report.resource_usage?.network?.drops > 0 && (
+                                <span className="text-yellow-300"> Network experienced {report.resource_usage.network.drops} packet drops.</span>
+                              )}
+                            </p>
+                          </div>
+
+                          {report.anomalies && report.anomalies.length > 0 && (
+                            <div>
+                              <p className="text-gray-400 text-xs mb-1">Anomalies Detected:</p>
+                              <p className="text-yellow-300">
+                                {report.anomalies.length} metric(s) deviated from baseline behavior.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <MetricBox 
+                        label="CPU Usage" 
+                        value={`${report.resource_usage?.cpu?.average?.toFixed(1) || 0}%`} 
+                        trend={`Peak: ${report.resource_usage?.cpu?.peak?.toFixed(1) || 0}%`} 
+                      />
+                      <MetricBox 
+                        label="Memory" 
+                        value={`${report.resource_usage?.memory?.average?.toFixed(1) || 0}%`} 
+                        trend={`Peak: ${report.resource_usage?.memory?.peak?.toFixed(1) || 0}%`} 
+                      />
+                      <MetricBox 
+                        label="Disk I/O" 
+                        value={`${((report.resource_usage?.disk_io?.reads_per_sec || 0) + (report.resource_usage?.disk_io?.writes_per_sec || 0)).toFixed(0)} IOPS`} 
+                        trend={`${report.resource_usage?.disk_io?.latency_ms?.toFixed(1) || 0}ms latency`} 
+                      />
+                      <MetricBox 
+                        label="Network" 
+                        value={`${((report.resource_usage?.network?.packets_sent || 0) + (report.resource_usage?.network?.packets_received || 0)).toLocaleString()} packets`} 
+                        trend={`${report.resource_usage?.network?.drops || 0} drops`} 
+                      />
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <h4 className="font-semibold text-base mb-3 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-blue-400" />
+                        Top Processes (Hourly Summary)
+                      </h4>
+                      {report.top_processes ? (
+                        <>
+                          {report.top_processes.cpu && Array.isArray(report.top_processes.cpu) && report.top_processes.cpu.length > 0 && (
+                          <div className="p-4 bg-gradient-to-r from-blue-500/10 to-blue-600/5 rounded-lg border border-blue-500/20">
+                            <h5 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
+                              <Activity className="w-4 h-4" />
+                              Top 3 CPU Consumers
+                            </h5>
+                            <div className="space-y-2">
+                              {report.top_processes.cpu.map((proc, i) => (
+                                <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-bold text-blue-400 w-6">#{i + 1}</span>
+                                      <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
+                                      <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-sm font-semibold text-blue-300">{(proc?.average || 0).toFixed(1)}%</span>
+                                      <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)}%</span>
                                     </div>
                                   </div>
+                                  {proc?.command_line && (
+                                    <div className="ml-8 mt-1">
+                                      <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
+                                    </div>
+                                  )}
                                 </div>
-                              );
-                            } catch (error) {
-                              console.error(`Error rendering recommendation ${i}:`, error, rec);
-                              return (
-                                <div key={i} className="p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-red-400 text-sm">
-                                  Error displaying recommendation {i + 1}
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {report.top_processes.memory && Array.isArray(report.top_processes.memory) && report.top_processes.memory.length > 0 && (
+                          <div className="p-4 bg-gradient-to-r from-purple-500/10 to-purple-600/5 rounded-lg border border-purple-500/20">
+                            <h5 className="text-sm font-medium text-purple-400 mb-3 flex items-center gap-2">
+                              <Database className="w-4 h-4" />
+                              Top 3 Memory Consumers
+                            </h5>
+                            <div className="space-y-2">
+                              {report.top_processes.memory.map((proc, i) => (
+                                <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-bold text-purple-400 w-6">#{i + 1}</span>
+                                      <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
+                                      <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-sm font-semibold text-purple-300">{(proc?.average || 0).toFixed(1)} MB</span>
+                                      <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
+                                    </div>
+                                  </div>
+                                  {proc?.command_line && (
+                                    <div className="ml-8 mt-1">
+                                      <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
+                                    </div>
+                                  )}
                                 </div>
-                              );
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {report.top_processes.disk_io && Array.isArray(report.top_processes.disk_io) && report.top_processes.disk_io.length > 0 && (
+                          <div className="p-4 bg-gradient-to-r from-green-500/10 to-green-600/5 rounded-lg border border-green-500/20">
+                            <h5 className="text-sm font-medium text-green-400 mb-3 flex items-center gap-2">
+                              <Activity className="w-4 h-4" />
+                              Top 3 Disk I/O Consumers
+                            </h5>
+                            <div className="space-y-2">
+                              {report.top_processes.disk_io.map((proc, i) => (
+                                <div key={i} className="p-2 bg-white/5 rounded border border-white/10">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-bold text-green-400 w-6">#{i + 1}</span>
+                                      <span className="text-sm font-medium text-gray-200">{proc?.name || 'unknown'}</span>
+                                      <span className="text-xs text-gray-500">(PID: {proc?.pid || 'N/A'})</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-sm font-semibold text-green-300">{(proc?.average || 0).toFixed(1)} MB</span>
+                                      <span className="text-xs text-gray-500 ml-2">peak: {(proc?.peak || 0).toFixed(1)} MB</span>
+                                    </div>
+                                  </div>
+                                  {proc?.command_line && (
+                                    <div className="ml-8 mt-1">
+                                      <span className="text-xs text-gray-400 font-mono break-all">{proc.command_line}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {(!report.top_processes.cpu || !Array.isArray(report.top_processes.cpu) || report.top_processes.cpu.length === 0) && 
+                         (!report.top_processes.memory || !Array.isArray(report.top_processes.memory) || report.top_processes.memory.length === 0) && 
+                         (!report.top_processes.disk_io || !Array.isArray(report.top_processes.disk_io) || report.top_processes.disk_io.length === 0) && (
+                          <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
+                            {report.top_processes ? 
+                              'Top processes data exists but is empty. Process metrics may not be available for the selected time period.' :
+                              'No process data available yet. Wait for the next hourly analysis.'
                             }
-                          })}
+                          </div>
+                        )}
+                        </>
+                      ) : (
+                        <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
+                          No process data available yet. Wait for the next hourly analysis.
                         </div>
-                      );
-                    } catch (error) {
-                      console.error('Error rendering recommendations section:', error, {
-                        ai_insights: report.ai_insights,
-                        recommendations: report.ai_insights?.recommendations
-                      });
-                      return (
-                        <div className="mt-4 p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-center text-red-400 text-sm">
-                          Error loading recommendations. Please check the console for details.
-                        </div>
-                      );
-                    }
-                  })()}
-                </>
-              ) : (
-                <div className="p-4 text-center text-gray-400">
-                  No report available yet. Click "Trigger Analysis" to generate one.
-                </div>
-              )}
-            </div>
+                      )}
+                    </div>
+
+                    {(() => {
+                      try {
+                        const recommendations = report.ai_insights?.recommendations;
+                        
+                        // Validate recommendations array
+                        if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
+                          if (report.ai_insights) {
+                            console.log('No recommendations available:', {
+                              has_ai_insights: !!report.ai_insights,
+                              recommendations_type: typeof recommendations,
+                              recommendations_is_array: Array.isArray(recommendations),
+                              recommendations_length: Array.isArray(recommendations) ? recommendations.length : 'N/A',
+                              recommendations_value: recommendations
+                            });
+                          }
+                          return (
+                            <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
+                              No AI recommendations available yet.
+                            </div>
+                          );
+                        }
+                        
+                        console.log(`Rendering ${recommendations.length} recommendations`);
+                        
+                        return (
+                          <div className="mt-4 space-y-2">
+                            <h4 className="font-medium text-sm mb-2">AI Recommendations</h4>
+                            {recommendations.slice(0, 5).map((rec, i) => {
+                              try {
+                                // Handle different formats: string, object with action/details, or object with title/description
+                                let action = '';
+                                let details = '';
+                                let priority = 'medium';
+                                
+                                if (typeof rec === 'string') {
+                                  action = rec;
+                                  details = rec;
+                                } else if (typeof rec === 'object' && rec !== null) {
+                                  // Try multiple possible formats
+                                  action = rec.title || rec.action || rec.name || '';
+                                  details = rec.description || rec.details || rec.explanation || action || '';
+                                  priority = (rec.priority || 'medium').toLowerCase();
+                                  
+                                  // Validate priority
+                                  if (!['high', 'medium', 'low'].includes(priority)) {
+                                    priority = 'medium';
+                                  }
+                                } else {
+                                  console.warn(`Unexpected recommendation format at index ${i}:`, typeof rec, rec);
+                                  action = String(rec || 'Unknown recommendation');
+                                  details = action;
+                                }
+                                
+                                // Ensure we have at least a title
+                                if (!action && details) {
+                                  action = details.substring(0, 80);
+                                } else if (!action) {
+                                  action = `Recommendation ${i + 1}`;
+                                }
+                                
+                                return (
+                                  <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
+                                    <div className="flex items-start gap-2">
+                                      <span className={`font-bold ${
+                                        priority === 'high' ? 'text-red-400' :
+                                        priority === 'medium' ? 'text-yellow-400' :
+                                        'text-blue-400'
+                                      }`}>#{i + 1}</span>
+                                      <div className="flex-1">
+                                        {action && <p className="text-sm font-medium text-gray-200">{action}</p>}
+                                        {details && details !== action && (
+                                          <p className="text-xs text-gray-400 mt-1">{details}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              } catch (error) {
+                                console.error(`Error rendering recommendation ${i}:`, error, rec);
+                                return (
+                                  <div key={i} className="p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-red-400 text-sm">
+                                    Error displaying recommendation {i + 1}
+                                  </div>
+                                );
+                              }
+                            })}
+                          </div>
+                        );
+                      } catch (error) {
+                        console.error('Error rendering recommendations section:', error, {
+                          ai_insights: report.ai_insights,
+                          recommendations: report.ai_insights?.recommendations
+                        });
+                        return (
+                          <div className="mt-4 p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-center text-red-400 text-sm">
+                            Error loading recommendations. Please check the console for details.
+                          </div>
+                        );
+                      }
+                    })()}
+                  </>
+                ) : (
+                  <div className="p-4 text-center text-gray-400">
+                    No report available yet. Click "Trigger Analysis" to generate one.
+                  </div>
+                )}
+              </div>
+            )}
         </section>
         </div>
 
         {/* Docker Containers Section - Horizontal Layout */}
         <div className="mt-8 mb-8">
-          <DockerContainers />
+          <DockerContainers selectedServer={selectedServer} />
         </div>
 
         {/* Container Healthchecks Section */}
         <div className="mt-8 mb-8">
-          <ContainerHealthchecks />
+          <ContainerHealthchecks selectedServer={selectedServer} />
         </div>
 
         {/* Metrics History Charts */}
         <div className="mt-8">
           <h2 className="text-2xl font-semibold mb-4">Metrics History</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <CPUChart timeRange="1h" hostname={selectedServer} />
-            <MemoryChart timeRange="1h" hostname={selectedServer} />
-            <DiskIOChart timeRange="1h" hostname={selectedServer} />
-            <NetworkChart timeRange="1h" hostname={selectedServer} />
-          </div>
+          
+          {selectedServer ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <CPUChart timeRange="1h" hostname={selectedServer} />
+              <MemoryChart timeRange="1h" hostname={selectedServer} />
+              <DiskIOChart timeRange="1h" hostname={selectedServer} />
+              <NetworkChart timeRange="1h" hostname={selectedServer} />
+            </div>
+          ) : (
+            <div className="space-y-12">
+              {servers.map(server => (
+                <div key={server} className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+                  <h3 className="text-xl font-medium mb-4 flex items-center gap-2 text-blue-300">
+                    <Server className="w-5 h-5" />
+                    {server}
+                  </h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <CPUChart timeRange="1h" hostname={server} />
+                    <MemoryChart timeRange="1h" hostname={server} />
+                    <DiskIOChart timeRange="1h" hostname={server} />
+                    <NetworkChart timeRange="1h" hostname={server} />
+                  </div>
+                </div>
+              ))}
+              {servers.length === 0 && (
+                <div className="text-center text-gray-400 py-8">
+                  No active servers found.
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Features */}

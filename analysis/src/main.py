@@ -9,6 +9,7 @@ import os
 from analyzers.hourly import HourlyAnalyzer
 from analyzers.daily import DailyAnalyzer
 from storage.clickhouse_client import ClickHouseClient
+from storage.bucket_manager import BucketManager
 from ai.engine import AIEngine
 from api import containers
 from api import healthchecks
@@ -47,13 +48,14 @@ ai_engine = None
 hourly_analyzer = None
 daily_analyzer = None
 scheduler = None
+bucket_manager = None
 latest_reports = {}  # Store the latest hourly reports per hostname
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
-    global clickhouse_client, ai_engine, hourly_analyzer, daily_analyzer, scheduler
+    global clickhouse_client, ai_engine, hourly_analyzer, daily_analyzer, scheduler, bucket_manager
     
     logger.info("🚀 Starting AncientReport AI Analysis Engine...")
     
@@ -81,6 +83,10 @@ async def startup_event():
     daily_analyzer = DailyAnalyzer(clickhouse_client, ai_engine)
     logger.info("✓ Analyzers initialized")
     
+    # Initialize bucket manager
+    bucket_manager = BucketManager()
+    logger.info("✓ Bucket manager initialized")
+    
     # Initialize scheduler
     scheduler = AsyncIOScheduler()
     
@@ -103,6 +109,17 @@ async def startup_event():
         minute=55,
         id='daily_analysis'
     )
+    
+    # Schedule bucket cleanup (every hour at minute 30)
+    scheduler.add_job(
+        cleanup_buckets,
+        'cron',
+        minute=30,
+        id='bucket_cleanup',
+        name='Bucket Cleanup',
+        replace_existing=True
+    )
+    logger.info("✓ Scheduled bucket cleanup (runs every hour at :30)")
     
     scheduler.start()
     logger.info("✓ Scheduler started")
@@ -177,6 +194,28 @@ async def run_daily_analysis():
         logger.error(f"Daily analysis failed: {e}", exc_info=True)
 
 
+async def cleanup_buckets():
+    """Run bucket cleanup job"""
+    global bucket_manager
+    try:
+        logger.info("=" * 60)
+        logger.info("🧹 Starting bucket cleanup")
+        logger.info("=" * 60)
+        
+        stats = bucket_manager.cleanup_old_buckets()
+        
+        logger.info("=" * 60)
+        logger.info(f"✅ Bucket cleanup complete!")
+        logger.info(f"   Raw files deleted: {stats['raw_deleted']}")
+        logger.info(f"   Processed files deleted: {stats['processed_deleted']}")
+        logger.info(f"   Errors: {stats['errors']}")
+        logger.info("=" * 60)
+    except Exception as e:
+        logger.error("=" * 60)
+        logger.error(f"❌ Bucket cleanup failed: {e}", exc_info=True)
+        logger.error("=" * 60)
+
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -204,6 +243,102 @@ async def get_servers():
         servers = await clickhouse_client.get_active_servers()
         return {"servers": servers}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/servers/info")
+async def get_servers_info():
+    """Get hardware information for all servers"""
+    try:
+        servers = await clickhouse_client.get_active_servers()
+        server_info = {}
+        
+        for hostname in servers:
+            # Fetch latest hardware metrics for this server
+            info_query = f"""
+            SELECT 
+                metric_name,
+                value
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
+              AND timestamp >= now() - INTERVAL 1 HOUR
+            ORDER BY timestamp DESC
+            LIMIT 3
+            """
+            
+            result = await clickhouse_client.query_df(info_query)
+            
+            # Build server info from query results
+            info = {
+                "hostname": hostname,
+                "cpu_cores": 0,
+                "memory_total_gb": 0,
+                "disk_total_gb": 0
+            }
+            
+            if result and result.get('data'):
+                for row in result['data']:
+                    metric_name = row[0]
+                    value = float(row[1]) if row[1] else 0
+                    
+                    if metric_name == 'cpu_cores':
+                        info["cpu_cores"] = int(value)
+                    elif metric_name == 'memory_total_mb':
+                        info["memory_total_gb"] = round(value / 1024, 2)
+                    elif metric_name == 'disk_total_gb':
+                        info["disk_total_gb"] = round(value, 2)
+            
+            server_info[hostname] = info
+        
+        return {"servers": server_info}
+    except Exception as e:
+        logger.error(f"Failed to fetch server info: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/servers/info/{hostname}")
+async def get_server_info(hostname: str):
+    """Get hardware information for a specific server"""
+    try:
+        # Fetch latest hardware metrics for this server
+        info_query = f"""
+        SELECT 
+            metric_name,
+            value
+        FROM metrics
+        WHERE hostname = '{hostname}'
+          AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
+          AND timestamp >= now() - INTERVAL 1 HOUR
+        ORDER BY timestamp DESC
+        LIMIT 3
+        """
+        
+        result = await clickhouse_client.query_df(info_query)
+        
+        # Build server info from query results
+        info = {
+            "hostname": hostname,
+            "cpu_cores": 0,
+            "memory_total_gb": 0,
+            "disk_total_gb": 0
+        }
+        
+        if result and result.get('data'):
+            for row in result['data']:
+                metric_name = row[0]
+                value = float(row[1]) if row[1] else 0
+                
+                if metric_name == 'cpu_cores':
+                    info["cpu_cores"] = int(value)
+                elif metric_name == 'memory_total_mb':
+                    info["memory_total_gb"] = round(value / 1024, 2)
+                elif metric_name == 'disk_total_gb':
+                    info["disk_total_gb"] = round(value, 2)
+        
+        return info
+    except Exception as e:
+        logger.error(f"Failed to fetch server info for {hostname}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -260,10 +395,13 @@ async def trigger_hourly_analysis(hostname: str = None):
     """Manually trigger an hourly analysis"""
     try:
         await run_hourly_analysis(hostname)
+        # Get the report that was just generated
+        key = hostname if hostname else "all"
+        report = latest_reports.get(key)
         return {
             "status": "success", 
             "message": f"Hourly analysis triggered for {hostname if hostname else 'all servers'}",
-            "report": latest_report
+            "report": report
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -280,7 +418,7 @@ async def trigger_daily_analysis():
 
 
 @app.get("/api/metrics/cpu")
-async def get_cpu_metrics(start: str = None, end: str = None):
+async def get_cpu_metrics(start: str = None, end: str = None, hostname: str = None):
     """Get CPU metrics for charting"""
     try:
         if end:
@@ -294,7 +432,7 @@ async def get_cpu_metrics(start: str = None, end: str = None):
             start_time = end_time - timedelta(hours=1)
         
         # Pass Tehran time directly (ClickHouse client handles timestamp conversion)
-        data = await clickhouse_client.get_metrics_raw(start_time, end_time, "cpu_usage_percent")
+        data = await clickhouse_client.get_metrics_raw(start_time, end_time, "cpu_usage_percent", hostname=hostname)
         
         if data and len(data) > 0:
             logger.info(f"DEBUG: Raw timestamp from driver: {data[0][0]} (type: {type(data[0][0])})")
@@ -339,7 +477,7 @@ async def get_cpu_metrics(start: str = None, end: str = None):
 
 
 @app.get("/api/metrics/memory")
-async def get_memory_metrics(start: str = None, end: str = None):
+async def get_memory_metrics(start: str = None, end: str = None, hostname: str = None):
     """Get memory metrics for charting"""
     try:
         if end:
@@ -353,7 +491,7 @@ async def get_memory_metrics(start: str = None, end: str = None):
             start_time = end_time - timedelta(hours=1)
         
         # Pass Tehran time directly
-        data = await clickhouse_client.get_metrics_raw(start_time, end_time, "memory_usage_percent")
+        data = await clickhouse_client.get_metrics_raw(start_time, end_time, "memory_usage_percent", hostname=hostname)
         
         # Format for frontend - convert UTC timestamps back to Tehran timezone
         formatted = []
@@ -379,7 +517,7 @@ async def get_memory_metrics(start: str = None, end: str = None):
 
 
 @app.get("/api/metrics/disk")
-async def get_disk_metrics(start: str = None, end: str = None):
+async def get_disk_metrics(start: str = None, end: str = None, hostname: str = None):
     """Get disk I/O metrics for charting"""
     try:
         if end:
@@ -393,8 +531,8 @@ async def get_disk_metrics(start: str = None, end: str = None):
             start_time = end_time - timedelta(hours=1)
         
         # Fetch reads and writes separately
-        reads_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "disk_reads_per_sec")
-        writes_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "disk_writes_per_sec")
+        reads_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "disk_reads_per_sec", hostname=hostname)
+        writes_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "disk_writes_per_sec", hostname=hostname)
         
         # Combine into single dataset with both metrics
         data_map = {}
@@ -445,7 +583,7 @@ async def get_disk_metrics(start: str = None, end: str = None):
 
 
 @app.get("/api/metrics/network")
-async def get_network_metrics(start: str = None, end: str = None):
+async def get_network_metrics(start: str = None, end: str = None, hostname: str = None):
     """Get network metrics for charting"""
     try:
         if end:
@@ -459,8 +597,8 @@ async def get_network_metrics(start: str = None, end: str = None):
             start_time = end_time - timedelta(hours=1)
         
         # Fetch sent and received separately
-        sent_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "network_packets_sent")
-        received_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "network_packets_received")
+        sent_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "network_packets_sent", hostname=hostname)
+        received_data = await clickhouse_client.get_metrics_raw(start_time, end_time, "network_packets_received", hostname=hostname)
         
         # Combine into single dataset with both metrics
         data_map = {}
@@ -581,6 +719,27 @@ async def debug_ai_response():
         }
     except Exception as e:
         logger.error(f"Debug AI response failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@app.get("/api/bucket/stats")
+async def get_bucket_stats():
+    """Get bucket storage statistics"""
+    try:
+        global bucket_manager
+        if not bucket_manager:
+            return {"error": "Bucket manager not initialized"}
+        
+        stats = bucket_manager.get_storage_stats()
+        return {
+            "status": "ok",
+            "storage": stats
+        }
+    except Exception as e:
+        logger.error(f"Failed to get bucket stats: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)

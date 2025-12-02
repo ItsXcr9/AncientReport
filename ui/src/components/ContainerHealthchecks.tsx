@@ -8,9 +8,14 @@ interface ContainerHealthcheck {
   health_test: string;
   failing_streak: number;
   last_log: string;
+  hostname: string;
 }
 
-export const ContainerHealthchecks: React.FC = () => {
+interface ContainerHealthchecksProps {
+  selectedServer: string | null;
+}
+
+export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ selectedServer }) => {
   const [healthchecks, setHealthchecks] = useState<ContainerHealthcheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +102,7 @@ export const ContainerHealthchecks: React.FC = () => {
           <Activity className="w-5 h-5 text-blue-400" />
           Container Healthchecks
           <span className="text-sm font-normal text-gray-400 ml-2">
-            ({healthchecks.length} {healthchecks.length === 1 ? 'container' : 'containers'})
+            ({healthchecks.filter(hc => !selectedServer || hc.hostname === selectedServer).length} {healthchecks.filter(hc => !selectedServer || hc.hostname === selectedServer).length === 1 ? 'container' : 'containers'})
           </span>
         </h2>
         <div className="text-xs text-gray-400">
@@ -118,7 +123,9 @@ export const ContainerHealthchecks: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {healthchecks.map((hc) => (
+          {healthchecks
+            .filter(hc => !selectedServer || hc.hostname === selectedServer)
+            .map((hc) => (
             <div
               key={hc.id}
               className={`p-4 rounded-lg border ${getStatusColor(hc.health_status)}`}

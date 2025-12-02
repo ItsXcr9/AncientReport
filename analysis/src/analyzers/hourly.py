@@ -7,6 +7,7 @@ import re
 
 from .metrics_aggregator import MetricsAggregator
 from utils.timezone import to_utc_for_query
+from storage.bucket_manager import BucketManager
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ class HourlyAnalyzer:
         self.ch = clickhouse_client
         self.ai = ai_engine
         self.aggregator = MetricsAggregator(clickhouse_client)
+        self.bucket_manager = BucketManager()
+        logger.info("HourlyAnalyzer initialized with BucketManager")
     
     async def run_analysis(self, end_time: datetime, hostname: str = None) -> Dict:
         """Run complete hourly analysis"""
@@ -71,6 +74,13 @@ class HourlyAnalyzer:
             "anomalies": anomalies
         }
         
+        # Save processed summary to bucket
+        try:
+            self.bucket_manager.save_hourly_processed(report, end_time, hostname)
+            logger.info(f"Saved hourly summary to bucket for {hostname if hostname else 'all servers'}")
+        except Exception as e:
+            logger.error(f"Failed to save hourly summary to bucket: {e}")
+        
         # Store report (TODO: implement ClickHouse storage)
         logger.info(f"Report generated: health_score={health_score}")
         
@@ -115,6 +125,22 @@ class HourlyAnalyzer:
             memory = aggregated.get('memory', {})
             
             logger.info(f"Fetched metrics - CPU: {cpu.get('average', 0):.2f}%, Memory: {memory.get('average', 0):.2f}%")
+            
+            # Save raw metrics to bucket for later analysis
+            try:
+                raw_data = {
+                    "cpu": cpu,
+                    "memory": memory,
+                    "disk_io": disk_io,
+                    "network": network,
+                    "hostname": hostname,
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat()
+                }
+                self.bucket_manager.save_hourly_raw(raw_data, end_time)
+                logger.info(f"Saved raw metrics to bucket")
+            except Exception as e:
+                logger.error(f"Failed to save raw metrics to bucket: {e}")
             
             return {
                 "cpu": cpu if cpu else {'average': 0, 'peak': 0},

@@ -53,7 +53,8 @@ async def get_current_containers():
             argMax(uptime_seconds, timestamp) as uptime_seconds,
             argMax(restart_count, timestamp) as restart_count,
             argMax(created_at, timestamp) as created_at,
-            max(timestamp) as last_seen
+            max(timestamp) as last_seen,
+            argMax(hostname, timestamp) as hostname
         FROM docker_containers
         WHERE timestamp > now() - INTERVAL 24 HOUR
           AND container_id != ''
@@ -82,6 +83,7 @@ async def get_current_containers():
             container_name_raw = row[1] if row[1] else ""
             image = row[2] if row[2] else ""
             last_seen_str = str(row[15]) if row[15] else ""
+            hostname = row[16] if row[16] else "unknown"
             
             # Clean container name - remove leading slash if present
             container_name = container_name_raw.lstrip('/') if container_name_raw else ""
@@ -118,7 +120,9 @@ async def get_current_containers():
                 "uptime_seconds": int(row[12]) if row[12] is not None else 0,
                 "restart_count": int(row[13]) if row[13] is not None else 0,
                 "created_at": str(row[14]) if row[14] else "",
-                "last_seen": last_seen_str
+                "created_at": str(row[14]) if row[14] else "",
+                "last_seen": last_seen_str,
+                "hostname": hostname
             })
         
         # Sort by status (running first) and then by name

@@ -105,7 +105,8 @@ async def get_container_healthchecks():
                 "health_status": health_status,  # starting, healthy, unhealthy
                 "health_test": health_test,
                 "failing_streak": health_details.get("failing_streak", 0),
-                "last_log": health_details.get("log", [{}])[-1].get("Output", "") if health_details.get("log") else ""
+                "last_log": health_details.get("log", [{}])[-1].get("Output", "") if health_details.get("log") else "",
+                "hostname": os.uname().nodename
             })
         
         logger.info(f"Found {len(containers)} containers with healthchecks")

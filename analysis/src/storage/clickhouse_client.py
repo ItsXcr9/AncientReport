@@ -118,7 +118,8 @@ class ClickHouseClient:
         start_time: datetime, 
         end_time: datetime, 
         metric_name: str,
-        limit: int = 1000
+        limit: int = 1000,
+        hostname: str = None
     ) -> List[tuple]:
         """Fetch raw metrics for charting - expects UTC datetime (ClickHouse stores in UTC)"""
         
@@ -130,19 +131,29 @@ class ClickHouseClient:
         start_ts = int(start_time.timestamp())
         end_ts = int(end_time.timestamp())
         
+        # Build WHERE clause with optional hostname filter
+        where_clauses = [
+            f"timestamp >= toDateTime({start_ts})",
+            f"timestamp <= toDateTime({end_ts})",
+            f"metric_name = '{metric_name}'"
+        ]
+        
+        if hostname:
+            where_clauses.append(f"hostname = '{hostname}'")
+        
+        where_clause = " AND ".join(where_clauses)
+        
         sql = f"""
         SELECT 
             timestamp,
             value
         FROM metrics
-        WHERE timestamp >= toDateTime({start_ts})
-          AND timestamp <= toDateTime({end_ts})
-          AND metric_name = '{metric_name}'
+        WHERE {where_clause}
         ORDER BY timestamp ASC
         LIMIT {limit}
         """
         
-        logger.debug(f"Fetching raw metrics: {metric_name} from {start_time} to {end_time} (ts: {start_ts}-{end_ts})")
+        logger.debug(f"Fetching raw metrics: {metric_name} from {start_time} to {end_time} (ts: {start_ts}-{end_ts}){f' for hostname={hostname}' if hostname else ' (all servers)'}")
         result = await self.query(sql)
         logger.debug(f"Retrieved {len(result)} rows for {metric_name}")
         return result
