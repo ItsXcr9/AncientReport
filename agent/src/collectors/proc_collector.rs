@@ -82,7 +82,8 @@ impl ProcCollector {
 
         // Collect CPU metrics
         let cpu_usage = self.system.global_cpu_info().cpu_usage();
-        info!("CPU usage: {:.2}%", cpu_usage);
+        let cpu_count = self.system.cpus().len();
+        info!("CPU usage: {:.2}% ({} cores)", cpu_usage, cpu_count);
         
         self.metrics_tx.send(Metric {
             timestamp,
@@ -90,6 +91,15 @@ impl ProcCollector {
             metric_type: "system".to_string(),
             metric_name: "cpu_usage_percent".to_string(),
             value: cpu_usage as f64,
+            tags: tags.clone(),
+        }).await?;
+
+        self.metrics_tx.send(Metric {
+            timestamp,
+            hostname: self.hostname.clone(),
+            metric_type: "system".to_string(),
+            metric_name: "cpu_cores".to_string(),
+            value: cpu_count as f64,
             tags: tags.clone(),
         }).await?;
 
@@ -173,6 +183,62 @@ impl ProcCollector {
             metric_type: "system".to_string(),
             metric_name: "process_count".to_string(),
             value: process_count as f64,
+            tags: tags.clone(),
+        }).await?;
+
+        // Collect disk space metrics
+        self.system.refresh_disks_list();
+        self.system.refresh_disks();
+        
+        let mut total_space: u64 = 0;
+        let mut available_space: u64 = 0;
+        
+        for disk in self.system.disks() {
+            // Only include physical disks (skip tmpfs, devtmpfs, etc.)
+            let fs_type = disk.file_system().to_string_lossy();
+            if !fs_type.starts_with("tmp") && !fs_type.starts_with("dev") {
+                total_space += disk.total_space();
+                available_space += disk.available_space();
+            }
+        }
+        
+        let used_space = total_space.saturating_sub(available_space);
+        let disk_usage_percent = if total_space > 0 {
+            (used_space as f64 / total_space as f64) * 100.0
+        } else {
+            0.0
+        };
+        
+        info!("Disk usage: {:.2}% ({} GB / {} GB)", 
+            disk_usage_percent,
+            used_space / 1024 / 1024 / 1024,
+            total_space / 1024 / 1024 / 1024
+        );
+        
+        self.metrics_tx.send(Metric {
+            timestamp,
+            hostname: self.hostname.clone(),
+            metric_type: "system".to_string(),
+            metric_name: "disk_total_gb".to_string(),
+            value: (total_space / 1024 / 1024 / 1024) as f64,
+            tags: tags.clone(),
+        }).await?;
+        
+        self.metrics_tx.send(Metric {
+            timestamp,
+            hostname: self.hostname.clone(),
+            metric_type: "system".to_string(),
+            metric_name: "disk_used_gb".to_string(),
+            value: (used_space / 1024 / 1024 / 1024) as f64,
+            tags: tags.clone(),
+        }).await?;
+        
+        self.metrics_tx.send(Metric {
+            timestamp,
+            hostname: self.hostname.clone(),
+            metric_type: "system".to_string(),
+            metric_name: "disk_usage_percent".to_string(),
+            value: disk_usage_percent,
             tags: tags.clone(),
         }).await?;
 
