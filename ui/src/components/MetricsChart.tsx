@@ -8,6 +8,7 @@ interface MetricsChartProps {
   color?: string;
   yAxisLabel?: string;
   timeRange?: string;
+  hostname?: string | null;
 }
 
 interface DataPoint {
@@ -21,7 +22,8 @@ export function MetricsChart({
   dataKey,
   color = '#3b82f6',
   yAxisLabel = 'Value',
-  timeRange = '1h'
+  timeRange = '1h',
+  hostname = null
 }: MetricsChartProps) {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,9 +55,12 @@ export function MetricsChart({
           break;
       }
 
-      const response = await fetch(
-        `${endpoint}?start=${start.toISOString()}&end=${end.toISOString()}`
-      );
+      let url = `${endpoint}?start=${start.toISOString()}&end=${end.toISOString()}`;
+      if (hostname) {
+        url += `&hostname=${hostname}`;
+      }
+
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error('Failed to fetch metrics');
@@ -98,7 +103,7 @@ export function MetricsChart({
     fetchData();
     const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
-  }, [endpoint, timeRange]);
+  }, [endpoint, timeRange, hostname]);
 
   const formatXAxis = (timestamp: string) => {
     try {

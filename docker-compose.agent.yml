@@ -1,0 +1,38 @@
+version: '3.8'
+
+# Remote Agent - Deploy on each monitored server
+# This agent collects metrics and sends them to the central ClickHouse server
+# Configure the central server IP in .env file
+
+services:
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: AncientReport-agent
+    network_mode: host
+    pid: "host"  # Required to see host processes, not container processes
+    privileged: true  # Required for eBPF
+    environment:
+      TZ: ${TZ:-Asia/Tehran}
+      # Central ClickHouse connection - REQUIRED
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:?Please set CLICKHOUSE_HOST in .env file}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-6123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-AncientReport}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-AncientReport}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-AncientReport}
+      # Agent hostname (auto-detect if not set)
+      AGENT_HOSTNAME: ${AGENT_HOSTNAME:-auto-detect}
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /proc:/host/proc:ro
+      # Mount config directory instead of file to avoid Docker creating a directory
+      - ./agent:/etc/AncientReport/config-source:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount timezone files to ensure correct time
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+
+# Note: This docker-compose file does NOT create any networks or volumes
+# The agent connects directly to the central ClickHouse server over the network

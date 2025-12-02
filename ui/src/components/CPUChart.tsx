@@ -1,6 +1,6 @@
 import { MetricsChart } from './MetricsChart';
 
-export function CPUChart({ timeRange = '1h' }: { timeRange?: string }) {
+export function CPUChart({ timeRange = '1h', hostname = null }: { timeRange?: string; hostname?: string | null }) {
   return (
     <MetricsChart
       title="CPU Usage"
@@ -9,6 +9,7 @@ export function CPUChart({ timeRange = '1h' }: { timeRange?: string }) {
       color="#3b82f6"
       yAxisLabel="CPU Usage (%)"
       timeRange={timeRange}
+      hostname={hostname}
     />
   );
 }

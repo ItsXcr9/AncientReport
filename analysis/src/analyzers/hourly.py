@@ -21,17 +21,17 @@ class HourlyAnalyzer:
         self.ai = ai_engine
         self.aggregator = MetricsAggregator(clickhouse_client)
     
-    async def run_analysis(self, end_time: datetime) -> Dict:
+    async def run_analysis(self, end_time: datetime, hostname: str = None) -> Dict:
         """Run complete hourly analysis"""
         logger.info(f"Starting hourly analysis for {end_time}")
         
         start_time = end_time - timedelta(hours=1)
         
         # Fetch current hour metrics (aggregated)
-        current_metrics = await self.fetch_metrics(start_time, end_time)
+        current_metrics = await self.fetch_metrics(start_time, end_time, hostname)
         
         # Calculate 7-day baseline
-        baseline = await self.calculate_baseline(end_time)
+        baseline = await self.calculate_baseline(end_time, hostname)
         
         # Detect anomalies
         anomalies = self.detect_anomalies(current_metrics, baseline)
@@ -40,11 +40,11 @@ class HourlyAnalyzer:
         config_issues = []
         
         # Fetch top processes (before building context so AI can see them)
-        top_processes = await self.fetch_top_processes(start_time, end_time)
+        top_processes = await self.fetch_top_processes(start_time, end_time, hostname)
         logger.info(f"Fetched top processes: CPU={len(top_processes.get('cpu', []))}, Memory={len(top_processes.get('memory', []))}, DiskIO={len(top_processes.get('disk_io', []))}")
         
         # Build context for AI (include top processes)
-        context = self.build_context(current_metrics, baseline, anomalies, config_issues, top_processes)
+        context = self.build_context(current_metrics, baseline, anomalies, config_issues, top_processes, hostname)
         
         # Generate AI insights
         ai_insights = await self.generate_ai_insights(context)
@@ -76,7 +76,7 @@ class HourlyAnalyzer:
         
         return report
     
-    async def fetch_metrics(self, start_time: datetime, end_time: datetime) -> Dict:
+    async def fetch_metrics(self, start_time: datetime, end_time: datetime, hostname: str = None) -> Dict:
         """Fetch aggregated metrics from ClickHouse - expects Tehran timezone, converts to UTC for query"""
         try:
             logger.info(f"Fetching metrics from {start_time} to {end_time}")
@@ -87,7 +87,7 @@ class HourlyAnalyzer:
             end_time_adjusted = end_time - timedelta(seconds=10)
             
             # Use the aggregator to get pre-processed metrics
-            aggregated = await self.aggregator.aggregate_hourly_metrics(start_time, end_time_adjusted)
+            aggregated = await self.aggregator.aggregate_hourly_metrics(start_time, end_time_adjusted, hostname)
             
             # If no data found, try multiple fallback strategies
             if aggregated.get('cpu', {}).get('average', 0) == 0:
@@ -96,13 +96,13 @@ class HourlyAnalyzer:
                 # Strategy 1: Try last 15 minutes
                 recent_start = end_time - timedelta(minutes=15)
                 logger.info(f"Trying last 15 minutes: {recent_start} to {end_time}")
-                aggregated = await self.aggregator.aggregate_hourly_metrics(recent_start, end_time_adjusted)
+                aggregated = await self.aggregator.aggregate_hourly_metrics(recent_start, end_time_adjusted, hostname)
                 
                 # Strategy 2: If still no data, try last 24 hours (get most recent data)
                 if aggregated.get('cpu', {}).get('average', 0) == 0:
                     logger.warning("No data in last 15 minutes, trying last 24 hours...")
                     day_start = end_time - timedelta(hours=24)
-                    aggregated = await self.aggregator.aggregate_hourly_metrics(day_start, end_time_adjusted)
+                    aggregated = await self.aggregator.aggregate_hourly_metrics(day_start, end_time_adjusted, hostname)
                     
                     # If we got data from 24h window, log a warning
                     if aggregated.get('cpu', {}).get('average', 0) > 0:
@@ -140,14 +140,14 @@ class HourlyAnalyzer:
                 "network": {"packets_sent": 0, "packets_received": 0, "drops": 0}
             }
     
-    async def calculate_baseline(self, end_time: datetime) -> Dict:
+    async def calculate_baseline(self, end_time: datetime, hostname: str = None) -> Dict:
         """Calculate 7-day baseline for same hour"""
         try:
             # Calculate baseline from past 7 days at same hour (+/- 30 min window)
             start_baseline = end_time - timedelta(days=7)
             
             # Fetch historical metrics
-            historical_metrics = await self.aggregator.aggregate_hourly_metrics(start_baseline, end_time)
+            historical_metrics = await self.aggregator.aggregate_hourly_metrics(start_baseline, end_time, hostname)
             
             # If we have enough data, calculate statistics
             # Otherwise, return None to indicate no baseline available
@@ -252,7 +252,7 @@ class HourlyAnalyzer:
         logger.info(f"Detected {len(anomalies)} anomalies")
         return anomalies
     
-    def build_context(self, current: Dict, baseline: Dict, anomalies: List, config_issues: List, top_processes: Dict) -> Dict:
+    def build_context(self, current: Dict, baseline: Dict, anomalies: List, config_issues: List, top_processes: Dict, hostname: str = None) -> Dict:
         """Build context dictionary for AI analysis"""
         # Format top processes for AI context
         top_cpu_str = ", ".join([f"{p['name']} (PID {p['pid']}, {p['average']:.1f}%)" for p in top_processes.get('cpu', [])[:3]])
@@ -280,7 +280,7 @@ class HourlyAnalyzer:
         packets_total = current["network"]["packets_sent"] + current["network"]["packets_received"]
         
         return {
-            "hostname": "production-server",
+            "hostname": hostname if hostname else "all-servers-aggregated",
             "uptime": "N/A",
             "cpu_count": "N/A",
             "memory_gb": "N/A",
@@ -641,7 +641,7 @@ class HourlyAnalyzer:
         
         return pressure_points
     
-    async def fetch_top_processes(self, start_time: datetime, end_time: datetime) -> Dict:
+    async def fetch_top_processes(self, start_time: datetime, end_time: datetime, hostname: str = None) -> Dict:
         """Fetch top processes for CPU, memory, and disk I/O"""
         try:
             # Fetch process metrics from ClickHouse
@@ -663,9 +663,9 @@ class HourlyAnalyzer:
             
             # For now, use a simpler aggregation approach
             # We'll query the metrics table directly with tags
-            top_cpu = await self._get_top_processes_by_metric("process_cpu_usage", start_time, end_time)
-            top_memory = await self._get_top_processes_by_metric("process_memory_mb", start_time, end_time)
-            top_disk_io = await self._get_top_processes_by_metric("process_disk_io_mb", start_time, end_time)
+            top_cpu = await self._get_top_processes_by_metric("process_cpu_usage", start_time, end_time, hostname)
+            top_memory = await self._get_top_processes_by_metric("process_memory_mb", start_time, end_time, hostname)
+            top_disk_io = await self._get_top_processes_by_metric("process_disk_io_mb", start_time, end_time, hostname)
             
             return {
                 "cpu": top_cpu[:3],  # Top 3
@@ -682,7 +682,7 @@ class HourlyAnalyzer:
                 "network": []
             }
     
-    async def _get_top_processes_by_metric(self, metric_name: str, start_time: datetime, end_time: datetime) -> List[Dict]:
+    async def _get_top_processes_by_metric(self, metric_name: str, start_time: datetime, end_time: datetime, hostname: str = None) -> List[Dict]:
         """Get top processes for a specific metric - expects Tehran timezone, converts to UTC for query"""
         try:
             # Convert to UTC for ClickHouse query
@@ -710,6 +710,7 @@ class HourlyAnalyzer:
               AND metric_name = '{metric_name}'
               AND has(tags, 'process_name')
               AND tags['process_name'] != ''
+              {f"AND hostname = '{hostname}'" if hostname else ""}
             GROUP BY tags['process_name'], tags['pid']
             HAVING process_name != '' AND process_name IS NOT NULL
             ORDER BY avg_value DESC

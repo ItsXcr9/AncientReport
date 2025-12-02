@@ -47,7 +47,7 @@ ai_engine = None
 hourly_analyzer = None
 daily_analyzer = None
 scheduler = None
-latest_report = None  # Store the latest hourly report
+latest_reports = {}  # Store the latest hourly reports per hostname
 
 
 @app.on_event("startup")
@@ -129,17 +129,20 @@ async def shutdown_event():
     logger.info("👋 Shutdown complete")
 
 
-async def run_hourly_analysis():
+async def run_hourly_analysis(hostname: str = None):
     """Run hourly analysis job"""
-    global latest_report
+    global latest_reports
     try:
         end_time = now()  # Use Tehran timezone
         logger.info("=" * 60)
         logger.info(f"🔄 Starting scheduled hourly analysis for {end_time}")
         logger.info("=" * 60)
         
-        report = await hourly_analyzer.run_analysis(end_time)
-        latest_report = report  # Store the latest report
+        report = await hourly_analyzer.run_analysis(end_time, hostname)
+        
+        # Store the latest report
+        key = hostname if hostname else "all"
+        latest_reports[key] = report
         
         # Log the metrics that were found
         resource_usage = report.get('resource_usage', {})
@@ -148,16 +151,14 @@ async def run_hourly_analysis():
         
         # Log top processes
         top_processes = report.get('top_processes', {})
-        top_cpu_count = len(top_processes.get('cpu', []))
-        top_mem_count = len(top_processes.get('memory', []))
-        top_io_count = len(top_processes.get('disk_io', []))
+        process_count = len(top_processes.get('cpu', []))
         
         logger.info("=" * 60)
-        logger.info(f"✅ Hourly analysis complete!")
+        logger.info(f"✅ Hourly analysis complete for {key}!")
         logger.info(f"   Health Score: {report.get('system_health', {}).get('overall_score', 'N/A')}/100")
         logger.info(f"   Status: {report.get('system_health', {}).get('status', 'N/A')}")
         logger.info(f"   CPU: {cpu_avg:.2f}% avg, Memory: {mem_avg:.2f}% avg")
-        logger.info(f"   Top Processes: CPU={top_cpu_count}, Memory={top_mem_count}, DiskIO={top_io_count}")
+        logger.info(f"   Top Processes: {process_count}")
         logger.info("=" * 60)
     except Exception as e:
         logger.error("=" * 60)
@@ -196,18 +197,40 @@ async def api_root():
     }
 
 
-@app.get("/api/reports/latest")
-async def get_latest_report():
-    """Get the latest hourly report"""
-    global latest_report
+@app.get("/api/servers")
+async def get_servers():
+    """Get list of active servers"""
     try:
-        if latest_report is None:
+        servers = await clickhouse_client.get_active_servers()
+        return {"servers": servers}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/reports/latest")
+async def get_latest_report(hostname: str = None):
+    """Get the latest hourly report"""
+    global latest_reports
+    try:
+        # If hostname is specified, fetch specific report
+        # If not, fetch aggregated report ("all")
+        key = hostname if hostname else "all"
+        report = latest_reports.get(key)
+        
+        if report is None:
+            # If specific hostname report not found, try to trigger a quick analysis for it
+            # This is useful for the first time a server is selected
+            if hostname:
+                 # We won't await this to avoid blocking, but it means the first request might still return no data
+                 # Alternatively, we could just return a "no data" message
+                 pass
+
             return {
                 "report_id": None,
                 "system_health": {"overall_score": 0, "status": "no_data"},
-                "message": "No reports available yet. Trigger an analysis to generate a report."
+                "message": f"No reports available yet for {key}. Trigger an analysis to generate a report."
             }
-        return latest_report
+        return report
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -233,13 +256,13 @@ async def get_daily_report(date: str):
 
 
 @app.post("/api/analysis/trigger/hourly")
-async def trigger_hourly_analysis():
+async def trigger_hourly_analysis(hostname: str = None):
     """Manually trigger an hourly analysis"""
     try:
-        await run_hourly_analysis()
+        await run_hourly_analysis(hostname)
         return {
             "status": "success", 
-            "message": "Hourly analysis triggered",
+            "message": f"Hourly analysis triggered for {hostname if hostname else 'all servers'}",
             "report": latest_report
         }
     except Exception as e:

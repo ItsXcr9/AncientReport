@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 interface DiskIOChartProps {
   timeRange?: string;
+  hostname?: string | null;
 }
 
 interface DataPoint {
@@ -11,7 +12,7 @@ interface DataPoint {
   writes: number;
 }
 
-export function DiskIOChart({ timeRange = '1h' }: DiskIOChartProps) {
+export function DiskIOChart({ timeRange = '1h', hostname = null }: DiskIOChartProps) {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +43,12 @@ export function DiskIOChart({ timeRange = '1h' }: DiskIOChartProps) {
           break;
       }
 
-      const response = await fetch(
-        `/api/metrics/disk?start=${start.toISOString()}&end=${end.toISOString()}`
-      );
+      let url = `/api/metrics/disk?start=${start.toISOString()}&end=${end.toISOString()}`;
+      if (hostname) {
+        url += `&hostname=${hostname}`;
+      }
+
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error('Failed to fetch disk metrics');
@@ -84,7 +88,7 @@ export function DiskIOChart({ timeRange = '1h' }: DiskIOChartProps) {
     fetchData();
     const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
-  }, [timeRange]);
+  }, [timeRange, hostname]);
 
   const formatXAxis = (timestamp: string) => {
     const date = new Date(timestamp);

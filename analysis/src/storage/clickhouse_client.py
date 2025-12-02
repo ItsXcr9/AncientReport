@@ -53,7 +53,8 @@ class ClickHouseClient:
         self, 
         start_time: datetime, 
         end_time: datetime, 
-        metric_name: str = None
+        metric_name: str = None,
+        hostname: str = None
     ) -> Dict[str, Any]:
         """Fetch pre-aggregated metrics for a time range"""
         
@@ -67,6 +68,9 @@ class ClickHouseClient:
         where_clause = f"WHERE timestamp >= toDateTime({start_ts}) AND timestamp <= toDateTime({end_ts})"
         if metric_name:
             where_clause += f" AND metric_name = '{metric_name}'"
+        
+        if hostname:
+            where_clause += f" AND hostname = '{hostname}'"
         
         sql = f"""
         SELECT 
@@ -154,3 +158,18 @@ class ClickHouseClient:
         except Exception as e:
             logger.error(f"Insert failed: {e}")
             raise
+
+    async def get_active_servers(self, hours: int = 24) -> List[str]:
+        """Get list of servers that have reported metrics recently"""
+        try:
+            sql = f"""
+            SELECT DISTINCT hostname 
+            FROM metrics 
+            WHERE timestamp >= now() - INTERVAL {hours} HOUR
+            ORDER BY hostname
+            """
+            result = await self.query(sql)
+            return [row[0] for row in result]
+        except Exception as e:
+            logger.error(f"Failed to get active servers: {e}")
+            return []

@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 interface NetworkChartProps {
   timeRange?: string;
+  hostname?: string | null;
 }
 
 interface DataPoint {
@@ -11,7 +12,7 @@ interface DataPoint {
   received: number;
 }
 
-export function NetworkChart({ timeRange = '1h' }: NetworkChartProps) {
+export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChartProps) {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +43,12 @@ export function NetworkChart({ timeRange = '1h' }: NetworkChartProps) {
           break;
       }
 
-      const response = await fetch(
-        `/api/metrics/network?start=${start.toISOString()}&end=${end.toISOString()}`
-      );
+      let url = `/api/metrics/network?start=${start.toISOString()}&end=${end.toISOString()}`;
+      if (hostname) {
+        url += `&hostname=${hostname}`;
+      }
+
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error('Failed to fetch network metrics');
@@ -84,7 +88,7 @@ export function NetworkChart({ timeRange = '1h' }: NetworkChartProps) {
     fetchData();
     const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
-  }, [timeRange]);
+  }, [timeRange, hostname]);
 
   const formatXAxis = (timestamp: string) => {
     const date = new Date(timestamp);

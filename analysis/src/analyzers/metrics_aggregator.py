@@ -16,7 +16,8 @@ class MetricsAggregator:
     async def aggregate_hourly_metrics(
         self, 
         start_time: datetime, 
-        end_time: datetime
+        end_time: datetime,
+        hostname: str = None
     ) -> Dict[str, Any]:
         """
         Aggregate an hour's worth of metrics into statistical summaries.
@@ -24,7 +25,7 @@ class MetricsAggregator:
         """
         
         # Get aggregated data from ClickHouse
-        result = await self.ch.get_metrics_aggregated(start_time, end_time)
+        result = await self.ch.get_metrics_aggregated(start_time, end_time, hostname=hostname)
         
         if not result or not result.get('data'):
             logger.warning(f"No metrics found for aggregation between {start_time} and {end_time}")

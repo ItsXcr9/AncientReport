@@ -7,6 +7,8 @@ import { NetworkChart } from './components/NetworkChart'
 import { DockerContainers } from './components/DockerContainers';
 import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 
+import ServerSelector from './components/ServerSelector';
+
 interface SystemHealth {
   status: string
   service: string
@@ -64,16 +66,37 @@ function App() {
   })
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0)
   const [isTriggering, setIsTriggering] = useState(false)
+  const [servers, setServers] = useState<string[]>([])
+  const [selectedServer, setSelectedServer] = useState<string | null>(null)
 
   useEffect(() => {
+    fetchServers()
     fetchHealth()
     fetchLatestReport()
     const interval = setInterval(() => {
+      fetchServers()
       fetchHealth()
       fetchLatestReport()
     }, 600000) // Refresh every 10 minutes (600000ms)
     return () => clearInterval(interval)
   }, [])
+
+  // Refetch report when selected server changes
+  useEffect(() => {
+    fetchLatestReport()
+  }, [selectedServer])
+
+  const fetchServers = async () => {
+    try {
+      const res = await fetch('/api/servers')
+      if (res.ok) {
+        const data = await res.json()
+        setServers(data.servers || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch servers:', error)
+    }
+  }
 
   // Cooldown timer for trigger analysis button
   useEffect(() => {
@@ -123,7 +146,11 @@ function App() {
   const fetchLatestReport = async () => {
     try {
       setReportLoading(true)
-      const res = await fetch('/api/reports/latest')
+      let url = '/api/reports/latest'
+      if (selectedServer) {
+        url += `?hostname=${selectedServer}`
+      }
+      const res = await fetch(url)
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`)
       }
@@ -216,7 +243,11 @@ function App() {
         timestamp: new Date().toISOString()
       })
       
-      const res = await fetch('/api/analysis/trigger/hourly', { method: 'POST' })
+      let url = '/api/analysis/trigger/hourly'
+      if (selectedServer) {
+        url += `?hostname=${selectedServer}`
+      }
+      const res = await fetch(url, { method: 'POST' })
       
       console.log('Analysis trigger response:', {
         status: res.status,
@@ -290,11 +321,18 @@ function App() {
                 Ancient Report AI
               </h1>
             </div>
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${health?.status === 'running' ? 'bg-green-400' : 'bg-red-400'}`} />
-              <span className="text-sm text-gray-400">
-                {loading ? 'Connecting...' : health?.status || 'Offline'}
-              </span>
+            <div className="flex items-center gap-4">
+              <ServerSelector 
+                servers={servers}
+                selectedServer={selectedServer}
+                onServerChange={setSelectedServer}
+              />
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${health?.status === 'running' ? 'bg-green-400' : 'bg-red-400'}`} />
+                <span className="text-sm text-gray-400">
+                  {loading ? 'Connecting...' : health?.status || 'Offline'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -737,10 +775,10 @@ function App() {
         <div className="mt-8">
           <h2 className="text-2xl font-semibold mb-4">Metrics History</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <CPUChart timeRange="1h" />
-            <MemoryChart timeRange="1h" />
-            <DiskIOChart timeRange="1h" />
-            <NetworkChart timeRange="1h" />
+            <CPUChart timeRange="1h" hostname={selectedServer} />
+            <MemoryChart timeRange="1h" hostname={selectedServer} />
+            <DiskIOChart timeRange="1h" hostname={selectedServer} />
+            <NetworkChart timeRange="1h" hostname={selectedServer} />
           </div>
         </div>
 

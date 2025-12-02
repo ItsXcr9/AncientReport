@@ -1,0 +1,75 @@
+version: '3.8'
+
+# Central Control Server - Deploy on main monitoring server
+# This runs ClickHouse database, Analysis engine, and UI
+# Agents on remote servers will connect to this ClickHouse instance
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: AncientReport-clickhouse
+    ports:
+      # Expose to 0.0.0.0 to allow remote agents to connect
+      - "0.0.0.0:6123:8123"  # HTTP interface for remote agents
+      - "0.0.0.0:6001:9000"  # Native protocol (optional)
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./deploy/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      TZ: Asia/Tehran
+      CLICKHOUSE_DB: AncientReport
+      CLICKHOUSE_USER: AncientReport
+      CLICKHOUSE_PASSWORD: AncientReport
+    networks:
+      - AncientReport
+    restart: unless-stopped
+
+  # Python analysis engine
+  analysis:
+    build:
+      context: ./analysis
+      dockerfile: Dockerfile
+    container_name: AncientReport-analysis
+    ports:
+      - "6800:8800"
+    environment:
+      TZ: Asia/Tehran
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: AncientReport
+      CLICKHOUSE_USER: AncientReport
+      CLICKHOUSE_PASSWORD: AncientReport
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-google}
+      AI_MODEL: ${AI_MODEL:-gemini-2.5-flash-lite}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - clickhouse
+    networks:
+      - AncientReport
+    restart: unless-stopped
+
+  # React frontend
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: AncientReport-ui
+    ports:
+      - "6080:3000"
+    environment:
+      TZ: Asia/Tehran
+      REACT_APP_API_URL: http://localhost:6800
+    depends_on:
+      - analysis
+    networks:
+      - AncientReport
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+
+networks:
+  AncientReport:
+    driver: bridge

@@ -5,6 +5,7 @@ set -e
 mkdir -p /etc/AncientReport
 
 # Determine config file source
+# Determine config file source
 CONFIG_SOURCE=""
 if [ -f /etc/AncientReport/config-source/config.toml ]; then
     # Use mounted config file if it exists
@@ -24,6 +25,32 @@ fi
 if [ -n "$CONFIG_SOURCE" ] && [ -f "$CONFIG_SOURCE" ]; then
     cp "$CONFIG_SOURCE" /etc/AncientReport/config.toml
     echo "Using config from: $CONFIG_SOURCE"
+    
+    # Apply environment variable overrides if they exist
+    if [ -n "$CLICKHOUSE_HOST" ]; then
+        echo "Configuring ClickHouse host: $CLICKHOUSE_HOST"
+        # Construct URL from host and port
+        CH_PORT="${CLICKHOUSE_PORT:-6123}"
+        CH_URL="http://${CLICKHOUSE_HOST}:${CH_PORT}"
+        sed -i "s|url = \".*\"|url = \"$CH_URL\"|g" /etc/AncientReport/config.toml
+    fi
+    
+    if [ -n "$CLICKHOUSE_DB" ]; then
+        sed -i "s|database = \".*\"|database = \"$CLICKHOUSE_DB\"|g" /etc/AncientReport/config.toml
+    fi
+    
+    if [ -n "$CLICKHOUSE_USER" ]; then
+        sed -i "s|username = \".*\"|username = \"$CLICKHOUSE_USER\"|g" /etc/AncientReport/config.toml
+    fi
+    
+    if [ -n "$CLICKHOUSE_PASSWORD" ]; then
+        sed -i "s|password = \".*\"|password = \"$CLICKHOUSE_PASSWORD\"|g" /etc/AncientReport/config.toml
+    fi
+    
+    if [ -n "$AGENT_HOSTNAME" ]; then
+        echo "Configuring Hostname: $AGENT_HOSTNAME"
+        sed -i "s|hostname = \".*\"|hostname = \"$AGENT_HOSTNAME\"|g" /etc/AncientReport/config.toml
+    fi
 else
     echo "Error: Could not find any config file"
     exit 1
