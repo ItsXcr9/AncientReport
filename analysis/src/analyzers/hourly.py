@@ -695,32 +695,23 @@ class HourlyAnalyzer:
             
             # Query to get average value per process (using tags)
             # Use bracket notation for Map access (compatible with older ClickHouse versions)
-            # Use subquery to handle GROUP BY properly with Map access
+            # Use argMax() to get the most recent command_line for each process (aggregate function)
             sql = f"""
             SELECT 
-                process_name,
-                pid,
-                avg_value,
-                max_value,
-                sample_count,
-                command_line
-            FROM (
-                SELECT 
-                    tags['process_name'] as process_name,
-                    tags['pid'] as pid,
-                    if(has(tags, 'command_line'), any(tags['command_line']), '') as command_line,
-                    avg(value) as avg_value,
-                    max(value) as max_value,
-                    count(*) as sample_count
-                FROM metrics
-                WHERE timestamp >= toDateTime({start_ts})
-                  AND timestamp <= toDateTime({end_ts})
-                  AND metric_name = '{metric_name}'
-                  AND has(tags, 'process_name')
-                  AND tags['process_name'] != ''
-                GROUP BY tags['process_name'], tags['pid']
-            )
-            WHERE process_name != '' AND process_name IS NOT NULL
+                tags['process_name'] as process_name,
+                tags['pid'] as pid,
+                argMax(if(has(tags, 'command_line'), tags['command_line'], ''), timestamp) as command_line,
+                avg(value) as avg_value,
+                max(value) as max_value,
+                count(*) as sample_count
+            FROM metrics
+            WHERE timestamp >= toDateTime({start_ts})
+              AND timestamp <= toDateTime({end_ts})
+              AND metric_name = '{metric_name}'
+              AND has(tags, 'process_name')
+              AND tags['process_name'] != ''
+            GROUP BY tags['process_name'], tags['pid']
+            HAVING process_name != '' AND process_name IS NOT NULL
             ORDER BY avg_value DESC
             LIMIT 10
             """
