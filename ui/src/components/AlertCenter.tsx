@@ -129,7 +129,7 @@ export function AlertCenter() {
                 <div className="p-2 border-b border-white/10 flex gap-2">
                   <button
                     onClick={clearAll}
-                    className="flex-1 px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors"
+                    className="flex-1 px-3 py-1.5 text-xs glass-panel hover:glass-card rounded transition-colors"
                   >
                     Clear All
                   </button>
@@ -197,7 +197,7 @@ export function AlertCenter() {
                                 </button>
                                 <button
                                   onClick={() => snoozeAlert(alert.id, 60)}
-                                  className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors flex items-center gap-1"
+                                  className="px-3 py-1.5 text-xs glass-panel hover:glass-card rounded transition-colors flex items-center gap-1"
                                   title="Snooze for 1 hour"
                                 >
                                   <Clock className="w-3 h-3" />

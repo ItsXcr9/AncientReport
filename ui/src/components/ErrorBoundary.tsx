@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
-          <div className="bg-white/5 rounded-xl border border-white/10 p-8 max-w-md">
+          <div className="glass-card-intense rounded-xl p-8 max-w-md">
             <h1 className="text-2xl font-bold text-red-400 mb-4">Something went wrong</h1>
             <p className="text-gray-400 mb-4">
               The application encountered an error. Please refresh the page.
@@ -54,6 +54,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children
   }
 }
+
 
 
 

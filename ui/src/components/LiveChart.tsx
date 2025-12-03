@@ -4,7 +4,7 @@
  * Combines historical data from API with real-time WebSocket updates
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, memo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
 import { Activity, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -38,7 +38,7 @@ export function LiveChart({
   timeRange = '1h',
   hostname = null,
   showLiveIndicator = true,
-  maxPoints = 200
+  maxPoints = 150
 }: LiveChartProps) {
   const [historicalData, setHistoricalData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,7 +113,7 @@ export function LiveChart({
   }, [endpoint, timeRange, hostname, isConnected]);
 
   // Merge historical and real-time data
-  const mergedData = (() => {
+  const mergedData = useMemo(() => {
     if (!isConnected || realtimeData.length === 0) {
       return historicalData;
     }
@@ -131,7 +131,7 @@ export function LiveChart({
     
     // Keep only maxPoints
     return sorted.slice(-maxPoints);
-  })();
+  }, [historicalData, realtimeData, isConnected, maxPoints]);
 
   const formatXAxis = (timestamp: string) => {
     try {
@@ -151,16 +151,18 @@ export function LiveChart({
   };
 
   // Calculate stats
-  const stats = mergedData.length > 0 ? {
-    current: mergedData[mergedData.length - 1]?.value || 0,
-    avg: mergedData.reduce((sum, d) => sum + d.value, 0) / mergedData.length,
-    max: Math.max(...mergedData.map(d => d.value)),
-    min: Math.min(...mergedData.map(d => d.value))
-  } : null;
+  const stats = useMemo(() => {
+    return mergedData.length > 0 ? {
+      current: mergedData[mergedData.length - 1]?.value || 0,
+      avg: mergedData.reduce((sum, d) => sum + d.value, 0) / mergedData.length,
+      max: Math.max(...mergedData.map(d => d.value)),
+      min: Math.min(...mergedData.map(d => d.value))
+    } : null;
+  }, [mergedData]);
 
   if (loading && mergedData.length === 0) {
     return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="glass-card rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4">{title}</h3>
         <div className="h-64 flex items-center justify-center text-gray-400">
           <RefreshCw className="w-6 h-6 animate-spin" />
@@ -171,7 +173,7 @@ export function LiveChart({
 
   if (error) {
     return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="glass-card rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4">{title}</h3>
         <div className="h-64 flex items-center justify-center text-red-400 text-sm">
           Error: {error}
@@ -182,7 +184,7 @@ export function LiveChart({
 
   return (
     <motion.div 
-      className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm"
+      className="glass-card rounded-xl p-6"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
@@ -288,3 +290,4 @@ export function LiveChart({
   );
 }
 
+export default memo(LiveChart);

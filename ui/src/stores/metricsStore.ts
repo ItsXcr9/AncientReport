@@ -29,8 +29,8 @@ interface MetricsState {
   setConnected: (connected: boolean) => void;
 }
 
-// Buffer capacity per metric (keep last 1000 points = ~16 minutes at 1s interval)
-const BUFFER_CAPACITY = 1000;
+// Buffer capacity per metric (keep last 500 points = ~8 minutes at 1s interval)
+const BUFFER_CAPACITY = 500;
 
 export const useMetricsStore = create<MetricsState>((set, get) => ({
   metrics: {},

@@ -135,7 +135,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ selectedServ
       )}
 
       {containers.length === 0 && !loading && (
-        <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400">
+        <div className="p-4 glass-panel rounded-lg text-center text-gray-400">
           No containers found
         </div>
       )}

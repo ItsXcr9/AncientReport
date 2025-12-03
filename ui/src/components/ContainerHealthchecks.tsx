@@ -88,7 +88,7 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
 
   if (loading && healthchecks.length === 0) {
     return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="glass-card rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
           <Activity className="w-5 h-5 text-blue-400" />
           Container Healthchecks
@@ -99,7 +99,7 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
   }
 
   return (
-    <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+    <div className="glass-card rounded-xl p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold flex items-center gap-2">
           <Activity className="w-5 h-5 text-blue-400" />
@@ -121,7 +121,7 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
       )}
 
       {healthchecks.length === 0 && !loading ? (
-        <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400">
+        <div className="p-4 glass-panel rounded-lg text-center text-gray-400">
           No containers with healthchecks configured found.
         </div>
       ) : (

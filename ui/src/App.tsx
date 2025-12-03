@@ -240,7 +240,7 @@ function App() {
       <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
       
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 backdrop-blur-xl bg-black/20">
+      <header className="fixed top-0 left-0 right-0 z-50 glass-header">
         <div className="container mx-auto px-6 h-16">
           <div className="flex items-center justify-between h-full">
             <div className="flex items-center gap-4">
@@ -256,7 +256,7 @@ function App() {
                 <h1 className="text-xl font-bold font-display tracking-tight bg-gradient-to-r from-neon-blue to-neon-purple bg-clip-text text-transparent">
                   ANCIENT REPORT
                 </h1>
-                <div className="text-[10px] text-gray-400 font-mono tracking-widest uppercase">System Intelligence v2.0</div>
+                <div className="text-[10px] text-gray-400 font-mono tracking-widest uppercase">Xcr9 AncientReport AI Intelligence v2.0</div>
               </div>
             </div>
 
@@ -301,7 +301,7 @@ function App() {
 
         {/* Latest Analysis Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <section className="lg:col-span-3 bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+          <section className="lg:col-span-3 glass-card rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-blue-400" />
@@ -339,28 +339,28 @@ function App() {
               <div className="space-y-6">
                 {/* General Information Summary */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                  <div className="p-4 glass-stat rounded-lg">
                     <div className="text-gray-400 text-sm mb-1">Total Servers</div>
                     <div className="text-2xl font-bold flex items-center gap-2">
                       <Server className="w-5 h-5 text-blue-400" />
                       {servers.length}
                     </div>
                   </div>
-                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                  <div className="p-4 glass-stat rounded-lg">
                     <div className="text-gray-400 text-sm mb-1">Total CPU Cores</div>
                     <div className="text-2xl font-bold flex items-center gap-2">
                       <Cpu className="w-5 h-5 text-purple-400" />
                       {serverInfo ? Object.values(serverInfo).reduce((acc: number, s: any) => acc + (s.cpu_cores || 0), 0) : '-'}
                     </div>
                   </div>
-                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                  <div className="p-4 glass-stat rounded-lg">
                     <div className="text-gray-400 text-sm mb-1">Total Memory</div>
                     <div className="text-2xl font-bold flex items-center gap-2">
                       <Database className="w-5 h-5 text-green-400" />
                       {serverInfo ? Object.values(serverInfo).reduce((acc: number, s: any) => acc + (s.memory_total_gb || 0), 0).toFixed(0) : '-'} GB
                     </div>
                   </div>
-                  <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                  <div className="p-4 glass-stat rounded-lg">
                     <div className="text-gray-400 text-sm mb-1">Total Storage</div>
                     <div className="text-2xl font-bold flex items-center gap-2">
                       <Database className="w-5 h-5 text-yellow-400" />
@@ -397,8 +397,8 @@ function App() {
               // Single Server View (Existing Logic)
               <div className="space-y-4 relative">
                 {isTriggering && (
-                  <div className="absolute inset-0 bg-black/50 backdrop-blur-sm rounded-lg z-10 flex items-center justify-center">
-                    <div className="bg-white/10 rounded-lg p-6 border border-white/20">
+                  <div className="absolute inset-0 glass-modal rounded-lg z-10 flex items-center justify-center">
+                    <div className="glass-card-intense rounded-lg p-6">
                       <div className="flex flex-col items-center gap-3">
                         <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
                         <p className="text-sm font-medium text-gray-200">Triggering Analysis...</p>
@@ -543,45 +543,9 @@ function App() {
           />
         </div>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.5 }}
-            className="glass-card rounded-xl p-1 overflow-hidden"
-          >
-            <CPUChart timeRange="1h" hostname={selectedServer} />
-          </motion.div>
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.6 }}
-            className="glass-card rounded-xl p-1 overflow-hidden"
-          >
-            <MemoryChart timeRange="1h" hostname={selectedServer} />
-          </motion.div>
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.7 }}
-            className="glass-card rounded-xl p-1 overflow-hidden"
-          >
-            <DiskIOChart timeRange="1h" hostname={selectedServer} />
-          </motion.div>
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.8 }}
-            className="glass-card rounded-xl p-1 overflow-hidden"
-          >
-            <NetworkChart timeRange="1h" hostname={selectedServer} />
-          </motion.div>
-        </div>
-
         {/* Analysis & Insights Section */}
         <div className="w-full mb-8">
-          <section className="w-full glass-card rounded-xl p-6 relative overflow-hidden">
+          <section className="w-full glass-card-intense rounded-xl p-6 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-neon-blue via-neon-purple to-neon-blue opacity-50" />
             
             <div className="flex items-center justify-between mb-6">
@@ -834,7 +798,7 @@ function App() {
           ) : (
             <div className="space-y-12">
               {servers.map(server => (
-                <div key={server} className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+                <div key={server} className="glass-card rounded-xl p-6">
                   <h3 className="text-xl font-medium mb-4 flex items-center gap-2 text-blue-300">
                     <Server className="w-5 h-5" />
                     {server}
@@ -880,14 +844,14 @@ function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/5 bg-black/20 backdrop-blur-xl py-8 mt-12">
+      <footer className="glass-header py-8 mt-12">
         <div className="container mx-auto px-6 text-center">
           <div className="flex items-center justify-center gap-2 mb-4 opacity-50">
             <Brain className="w-5 h-5" />
             <span className="font-display font-bold tracking-widest">ANCIENT REPORT</span>
           </div>
           <p className="text-gray-500 text-sm">
-            &copy; {new Date().getFullYear()} Ancient Report AI. System Intelligence v2.0
+            &copy; {new Date().getFullYear()} Xcr9 Ancient Report AI. System Intelligence v2.0
           </p>
         </div>
       </footer>
@@ -903,7 +867,7 @@ function FeatureCard({ title, description, icon: Icon, delay = 0 }: { title: str
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ delay }}
-      className="glass-card p-6 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors"
+      className="glass-card p-6 rounded-xl transition-colors"
     >
       <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-neon-blue/20 to-neon-purple/20 flex items-center justify-center mb-4">
         <Icon className="w-6 h-6 text-white" />

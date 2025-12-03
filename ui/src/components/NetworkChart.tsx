@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 interface NetworkChartProps {
@@ -12,7 +12,7 @@ interface DataPoint {
   received: number;
 }
 
-export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChartProps) {
+const NetworkChartComponent = ({ timeRange = '1h', hostname = null }: NetworkChartProps) => {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +104,7 @@ export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChart
 
   if (loading && data.length === 0) {
     return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="glass-card rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4">Network Traffic</h3>
         <div className="h-64 flex items-center justify-center text-gray-400">
           Loading...
@@ -115,7 +115,7 @@ export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChart
 
   if (error) {
     return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="glass-card rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4">Network Traffic</h3>
         <div className="h-64 flex items-center justify-center text-red-400">
           Error: {error}
@@ -126,7 +126,7 @@ export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChart
 
   if (data.length === 0) {
     return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+      <div className="glass-card rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4">Network Traffic</h3>
         <div className="h-64 flex items-center justify-center text-gray-400">
           No data available
@@ -136,7 +136,7 @@ export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChart
   }
 
   return (
-    <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
+    <div className="glass-card rounded-xl p-6">
       <h3 className="text-lg font-semibold mb-4">Network Traffic</h3>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data}>
@@ -184,5 +184,6 @@ export function NetworkChart({ timeRange = '1h', hostname = null }: NetworkChart
       </ResponsiveContainer>
     </div>
   );
-}
+};
 
+export const NetworkChart = memo(NetworkChartComponent);
