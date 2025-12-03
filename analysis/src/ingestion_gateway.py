@@ -1,6 +1,8 @@
 """
 NATS Ingestion Gateway
-Consumes metrics from NATS JetStream and writes to ClickHouse in batches
+Consumes metrics from NATS JetStream and:
+1. Writes to ClickHouse in batches (persistence)
+2. Broadcasts to WebSocket clients (real-time)
 """
 import asyncio
 import logging
@@ -14,6 +16,14 @@ from storage.clickhouse_client import ClickHouseClient
 
 logger = logging.getLogger(__name__)
 
+# Will be set by main.py to enable WebSocket broadcasting
+websocket_broadcast_func = None
+
+def set_broadcast_function(func):
+    """Set the WebSocket broadcast function"""
+    global websocket_broadcast_func
+    websocket_broadcast_func = func
+
 
 class IngestionGateway:
     """
@@ -26,7 +36,7 @@ class IngestionGateway:
         self.nc: NATS = None
         self.js: JetStreamContext = None
         self.batch_buffer: List[dict] = []
-        self.batch_size = 500
+        self.batch_size = 100  # Flush more frequently for lower latency
         
     async def connect(self):
         """Connect to NATS JetStream"""
@@ -36,80 +46,133 @@ class IngestionGateway:
         self.js = self.nc.jetstream()
         logger.info("Connected to NATS JetStream")
         
+        # Ensure METRICS stream exists (should match agent's stream config)
+        try:
+            from nats.js.api import StreamConfig, RetentionPolicy, StorageType
+            
+            stream_config = StreamConfig(
+                name="METRICS",
+                subjects=["metrics.system.*", "metrics.network.*", "metrics.disk.*", "metrics.process.*"],
+                retention=RetentionPolicy.LIMITS,
+                max_bytes=1_000_000_000,  # 1GB
+                max_age=86400,  # 24 hours
+                storage=StorageType.FILE
+            )
+            
+            # Try to get or create the stream
+            try:
+                await self.js.stream_info("METRICS")
+                logger.info("✓ METRICS stream exists")
+            except:
+                await self.js.add_stream(stream_config)
+                logger.info("✓ Created METRICS stream")
+                
+        except Exception as e:
+            logger.warning(f"Could not ensure METRICS stream: {e}")
+            logger.warning("Stream should be created by agent, continuing anyway...")
+        
     async def start(self):
-        """Start consuming from NATS and writing to ClickHouse"""
+        """Start consuming from NATS and writing to ClickHouse using pull-based consumer"""
         try:
             await self.connect()
             
-            # Subscribe to metrics stream with pull consumer
-            subscription = await self.js.pull_subscribe(
+            # Use pull-based consumer (recommended for ingestion pipelines)
+            logger.info("Creating pull consumer for metrics.> on stream METRICS...")
+            
+            # Try to delete existing consumer first (in case it's stuck)
+            try:
+                await self.js.delete_consumer(stream="METRICS", consumer="clickhouse_writer")
+                logger.info("Deleted old consumer")
+            except:
+                pass  # Consumer doesn't exist, that's fine
+            
+            psub = await self.js.pull_subscribe(
                 subject="metrics.>",
+                stream="METRICS",
                 durable="clickhouse_writer"
             )
             
-            logger.info("Started ingestion gateway, consuming from METRICS stream")
+            logger.info("✅ Pull consumer 'clickhouse_writer' created on METRICS stream")
+            logger.info("   Subject filter: metrics.>")
+            logger.info("   Starting fetch loop...")
             
-            # Continuously fetch messages
+            # Main consumption loop
+            loop_count = 0
             while True:
                 try:
-                    # Fetch batch of messages (up to 10 at a time)
-                    msgs = await subscription.fetch(batch=10, timeout=5)
+                    loop_count += 1
+                    if loop_count % 10 == 1:
+                        logger.info(f"💓 Fetch loop heartbeat (iteration {loop_count})")
                     
+                    # Fetch batch of messages (up to 10 at a time)
+                    logger.debug("Calling psub.fetch(batch=10, timeout=5)...")
+                    msgs = await psub.fetch(batch=10, timeout=5)
+                    
+                    logger.info(f"📬 Fetched {len(msgs)} messages from NATS (subject: metrics.>)")
+                    
+                    # Process each message
                     for msg in msgs:
                         try:
                             # Deserialize MessagePack payload
                             metrics = msgpack.unpackb(msg.data, raw=False)
                             
-                            # Flatten nested structures (only flatten lists, not dicts)
-                            def flatten_metrics(data):
-                                """Recursively flatten metrics to list of dicts"""
-                                result = []
-                                if isinstance(data, dict):
-                                    # Check if this is a valid metric (has required fields)
-                                    if 'timestamp' in data or 'hostname' in data or 'value' in data:
-                                        result.append(data)
-                                    else:
-                                        # This is probably nested data (like tags), skip it
-                                        pass
-                                elif isinstance(data, list):
-                                    for item in data:
-                                        if isinstance(item, dict):
-                                            # Only add if it looks like a metric
-                                            if 'timestamp' in item or 'hostname' in item or 'value' in item:
-                                                result.append(item)
-                                        elif isinstance(item, list):
-                                            # Recursively flatten nested lists
-                                            result.extend(flatten_metrics(item))
-                                return result
+                            # Log first message
+                            if not hasattr(self, '_logged_first'):
+                                logger.info(f"✅ First NATS message! Type: {type(metrics)}, Count: {len(metrics) if isinstance(metrics, list) else 1}")
+                                if isinstance(metrics, list) and len(metrics) > 0:
+                                    logger.info(f"   Sample: hostname={metrics[0].get('hostname')}, metric={metrics[0].get('metric_name')}, ts={metrics[0].get('timestamp')}")
+                                self._logged_first = True
                             
-                            # Add flattened metrics to batch buffer
-                            flattened = flatten_metrics(metrics)
-                            if flattened:
-                                self.batch_buffer.extend(flattened)
-                            elif isinstance(metrics, dict) and ('timestamp' in metrics or 'value' in metrics):
-                                # Single metric, add directly
+                            # Process metrics - agent sends list of Metric structs
+                            if isinstance(metrics, list):
+                                for metric in metrics:
+                                    if isinstance(metric, dict) and metric.get('hostname'):
+                                        self.batch_buffer.append(metric)
+                                        
+                                        # V2: Broadcast to WebSocket clients immediately for real-time updates
+                                        if websocket_broadcast_func:
+                                            try:
+                                                await websocket_broadcast_func(metric)
+                                            except Exception as e:
+                                                logger.debug(f"WebSocket broadcast failed: {e}")
+                                                
+                            elif isinstance(metrics, dict) and metrics.get('hostname'):
                                 self.batch_buffer.append(metrics)
+                                
+                                # V2: Broadcast to WebSocket
+                                if websocket_broadcast_func:
+                                    try:
+                                        await websocket_broadcast_func(metrics)
+                                    except Exception as e:
+                                        logger.debug(f"WebSocket broadcast failed: {e}")
                             
-                            # Flush if batch is full
-                            if len(self.batch_buffer) >= self.batch_size:
-                                await self.flush_batch()
-                            
-                            # Acknowledge message
+                            # IMPORTANT: Always ack() after successful processing
                             await msg.ack()
+                            logger.debug(f"✓ Acked message")
                             
                         except Exception as e:
-                            logger.error(f"Error processing message: {e}")
-                            # Negative acknowledge to retry
-                            await msg.nak()
-                            
-                except asyncio.TimeoutError:
-                    # No messages available, flush any pending buffer
+                            logger.error(f"❌ Error processing message: {e}", exc_info=True)
+                            # Negative ack to retry later
+                            try:
+                                await msg.nak()
+                            except:
+                                pass
+                    
+                    # Flush if batch is full
+                    if len(self.batch_buffer) >= self.batch_size:
+                        logger.info(f"📦 Buffer full ({len(self.batch_buffer)} metrics), flushing to ClickHouse...")
+                        await self.flush_batch()
+                
+                except TimeoutError:
+                    # No messages available (normal), flush any pending buffer
+                    logger.debug("Fetch timeout (no messages), flushing buffer if not empty...")
                     if self.batch_buffer:
+                        logger.info(f"⏰ Periodic flush of {len(self.batch_buffer)} buffered metrics")
                         await self.flush_batch()
                     continue
                     
                 except Exception as e:
-                    logger.error(f"Error fetching messages: {e}")
+                    logger.error(f"❌ Error in fetch loop: {e}", exc_info=True)
                     await asyncio.sleep(5)  # Wait before retrying
                     
         except Exception as e:
@@ -124,9 +187,10 @@ class IngestionGateway:
         try:
             count = len(self.batch_buffer)
             
-            # Log first few metrics for debugging (only on first batch)
-            if count > 0 and count < 50:  # Only log first batch
-                logger.info(f"Sample metric from NATS: {self.batch_buffer[0] if self.batch_buffer else 'empty'}")
+            # Log first few metrics for debugging
+            if count > 0:
+                sample = self.batch_buffer[0] if self.batch_buffer else {}
+                logger.info(f"Batch of {count} items - Sample: hostname={sample.get('hostname')}, metric={sample.get('metric_name')}, ts={sample.get('timestamp')}")
             
             # Convert to ClickHouse format
             rows = []
@@ -141,9 +205,15 @@ class IngestionGateway:
                     # Parse timestamp - handle multiple formats
                     ts = metric.get('timestamp')
                     
+                    # Skip metrics without hostname or timestamp (invalid data)
+                    hostname_val = metric.get('hostname')
+                    if not hostname_val or hostname_val == 'unknown':
+                        logger.debug(f"Skipping metric without valid hostname")
+                        continue
+                    
                     # Handle None/missing timestamp
                     if ts is None:
-                        logger.warning(f"Metric missing timestamp, using current time: {metric.get('metric_name', 'unknown')}")
+                        logger.warning(f"Metric missing timestamp, using current time: {metric.get('metric_name', 'unknown')} from {hostname_val}")
                         timestamp = datetime.utcnow()
                     elif isinstance(ts, str):
                         # Try to parse ISO format or other common formats
@@ -157,9 +227,11 @@ class IngestionGateway:
                                 logger.warning(f"Could not parse timestamp string: {ts}, using current time")
                                 timestamp = datetime.utcnow()
                     elif isinstance(ts, (int, float)):
-                        # Unix timestamp (seconds since epoch)
+                        # Unix timestamp (seconds since epoch) - agent sends this
                         try:
-                            timestamp = datetime.utcfromtimestamp(ts)
+                            # Unix timestamps are always UTC
+                            timestamp = datetime.fromtimestamp(ts, tz=None)  # Creates naive datetime in UTC
+                            logger.debug(f"Converted Unix timestamp {ts} to {timestamp}")
                         except (ValueError, OSError) as e:
                             logger.warning(f"Invalid unix timestamp {ts}: {e}, using current time")
                             timestamp = datetime.utcnow()
@@ -179,8 +251,8 @@ class IngestionGateway:
                         tags_dict = {}
                     
                     row = (
-                        timestamp,  # timestamp (DateTime)
-                        str(metric.get('hostname', 'unknown')),  # hostname (String)
+                        timestamp,  # timestamp (DateTime) - stored as UTC in ClickHouse
+                        str(hostname_val),  # hostname (String)
                         str(metric.get('metric_type', 'system')),  # metric_type (String)
                         str(metric.get('metric_name', 'unknown')),  # metric_name (String)
                         float(metric.get('value', 0)),  # value (Float64)
@@ -194,10 +266,11 @@ class IngestionGateway:
             
             if rows:
                 # Batch insert to ClickHouse
+                logger.info(f"Inserting {len(rows)} rows to ClickHouse...")
                 await self.clickhouse.insert('metrics', rows)
-                logger.info(f"Flushed {len(rows)} metrics to ClickHouse (from {count} total)")
+                logger.info(f"✅ Successfully flushed {len(rows)} metrics to ClickHouse (from {count} buffered items)")
             else:
-                logger.warning(f"No valid metrics to flush from {count} items")
+                logger.warning(f"⚠️ No valid metrics to flush from {count} items")
             
             # Clear buffer
             self.batch_buffer.clear()
