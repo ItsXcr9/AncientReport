@@ -153,9 +153,27 @@ async def startup_event():
     # Start NATS ingestion gateway in V2 mode
     if v2_mode:
         logger.info(f"Starting NATS ingestion gateway (URL: {nats_url})...")
+        
+        # Import and set WebSocket broadcast function
+        try:
+            from api.realtime import broadcast_metric
+            from ingestion_gateway import set_broadcast_function
+            set_broadcast_function(broadcast_metric)
+            logger.info("✓ WebSocket broadcasting enabled for real-time metrics")
+        except Exception as e:
+            logger.warning(f"Could not enable WebSocket broadcasting: {e}")
+        
         ingestion_gateway = IngestionGateway(nats_url, clickhouse_client)
-        asyncio.create_task(ingestion_gateway.start())
-        logger.info("✓ NATS ingestion gateway started")
+        
+        # Create task with error handling
+        async def run_ingestion_gateway():
+            try:
+                await ingestion_gateway.start()
+            except Exception as e:
+                logger.error(f"❌ FATAL: Ingestion gateway crashed: {e}", exc_info=True)
+                
+        asyncio.create_task(run_ingestion_gateway())
+        logger.info("✓ NATS ingestion gateway task created (NATS → ClickHouse + WebSocket)")
     
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 
@@ -280,6 +298,7 @@ async def get_servers_info():
         
         for hostname in servers:
             # Fetch latest hardware metrics for this server
+            # Hardware info doesn't change often, so look back 7 days
             info_query = f"""
             SELECT 
                 metric_name,
@@ -287,7 +306,7 @@ async def get_servers_info():
             FROM metrics
             WHERE hostname = '{hostname}'
               AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
-              AND timestamp >= now() - INTERVAL 1 HOUR
+              AND timestamp >= now() - INTERVAL 7 DAY
             GROUP BY metric_name
             """
             
@@ -326,6 +345,7 @@ async def get_server_info(hostname: str):
     """Get hardware information for a specific server"""
     try:
         # Fetch latest hardware metrics for this server
+        # Hardware info doesn't change often, so look back 7 days
         info_query = f"""
         SELECT 
             metric_name,
@@ -333,7 +353,7 @@ async def get_server_info(hostname: str):
         FROM metrics
         WHERE hostname = '{hostname}'
           AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
-          AND timestamp >= now() - INTERVAL 1 HOUR
+          AND timestamp >= now() - INTERVAL 7 DAY
         GROUP BY metric_name
         """
         

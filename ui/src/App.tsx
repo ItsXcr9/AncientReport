@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp, Loader2, Clock, Wifi, WifiOff } from 'lucide-react';
+import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp, Loader2, Clock, Wifi, WifiOff, Zap } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { CPUChart } from './components/CPUChart'
 import { MemoryChart } from './components/MemoryChart'
 import { DiskIOChart } from './components/DiskIOChart'
 import { NetworkChart } from './components/NetworkChart'
 import { DockerContainers } from './components/DockerContainers';
 import { ContainerHealthchecks } from './components/ContainerHealthchecks';
+import { AlertCenter } from './components/AlertCenter';
+import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
+import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
+import { useMetricsStore } from './stores/metricsStore';
 
 import ServerSelector from './components/ServerSelector';
 import { ServerInfoCard } from './components/ServerInfoCard'
@@ -71,9 +76,14 @@ function App() {
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [serverInfo, setServerInfo] = useState<any>(null)
   
-  // V2 Mode: Always show as available since NATS is configured
-  // The backend will gracefully fall back to V1 if NATS is unavailable
-  const wsConnected = true
+  // V2 Mode: Real-time WebSocket connection
+  const { isConnected: wsConnected } = useRealtimeMetrics({ 
+    enabled: true,
+    server: selectedServer 
+  });
+  
+  // Enable real-time alerts
+  useRealtimeAlerts();
 
   useEffect(() => {
     fetchServers()
@@ -340,20 +350,38 @@ function App() {
                 selectedServer={selectedServer}
                 onServerChange={setSelectedServer}
               />
+              
+              {/* Alert Center */}
+              <AlertCenter />
+              
               {/* WebSocket Status Indicator */}
-              <div className="flex items-center gap-2">
+              <motion.div 
+                className="flex items-center gap-2"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
                 {wsConnected ? (
-                  <>
-                    <Wifi className="w-4 h-4 text-green-400" />
-                    <span className="text-xs text-green-400">V2 Live</span>
-                  </>
+                  <motion.div
+                    className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 rounded-full border border-green-500/20"
+                    initial={{ scale: 0.9 }}
+                    animate={{ scale: 1 }}
+                  >
+                    <motion.div
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ repeat: Infinity, duration: 2 }}
+                    >
+                      <Zap className="w-4 h-4 text-green-400" />
+                    </motion.div>
+                    <span className="text-xs text-green-400 font-medium">V2 Live</span>
+                  </motion.div>
                 ) : (
-                  <>
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-500/10 rounded-full border border-gray-500/20">
                     <WifiOff className="w-4 h-4 text-gray-500" />
                     <span className="text-xs text-gray-500">V1 Mode</span>
-                  </>
+                  </div>
                 )}
-              </div>
+              </motion.div>
+              
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${health?.status === 'running' ? 'bg-green-400' : 'bg-red-400'}`} />
                 <span className="text-sm text-gray-400">

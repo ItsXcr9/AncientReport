@@ -7,7 +7,7 @@ services:
       - "-sd"
       - "/data"
     ports:
-      - "4222:4222"
+      - "0.0.0.0:4222:4222" # Expose to host network for agent
       - "8222:8222"
     volumes:
       - nats-data:/data

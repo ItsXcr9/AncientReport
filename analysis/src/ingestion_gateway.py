@@ -36,7 +36,7 @@ class IngestionGateway:
         self.nc: NATS = None
         self.js: JetStreamContext = None
         self.batch_buffer: List[dict] = []
-        self.batch_size = 100  # Flush more frequently for lower latency
+        self.batch_size = 5  # Flush very frequently for testing
         
     async def connect(self):
         """Connect to NATS JetStream"""
@@ -119,15 +119,17 @@ class IngestionGateway:
                             # Log first message
                             if not hasattr(self, '_logged_first'):
                                 logger.info(f"✅ First NATS message! Type: {type(metrics)}, Count: {len(metrics) if isinstance(metrics, list) else 1}")
-                                if isinstance(metrics, list) and len(metrics) > 0:
+                                if isinstance(metrics, list) and len(metrics) > 0 and isinstance(metrics[0], dict):
                                     logger.info(f"   Sample: hostname={metrics[0].get('hostname')}, metric={metrics[0].get('metric_name')}, ts={metrics[0].get('timestamp')}")
                                 self._logged_first = True
                             
                             # Process metrics - agent sends list of Metric structs
                             if isinstance(metrics, list):
+                                added_count = 0
                                 for metric in metrics:
                                     if isinstance(metric, dict) and metric.get('hostname'):
                                         self.batch_buffer.append(metric)
+                                        added_count += 1
                                         
                                         # V2: Broadcast to WebSocket clients immediately for real-time updates
                                         if websocket_broadcast_func:
@@ -135,9 +137,15 @@ class IngestionGateway:
                                                 await websocket_broadcast_func(metric)
                                             except Exception as e:
                                                 logger.debug(f"WebSocket broadcast failed: {e}")
+                                    else:
+                                        logger.debug(f"Skipping metric: is_dict={isinstance(metric, dict)}, type={type(metric)}")
+                                
+                                if added_count > 0:
+                                    logger.info(f"Added {added_count} metrics to buffer (buffer size now: {len(self.batch_buffer)})")
                                                 
                             elif isinstance(metrics, dict) and metrics.get('hostname'):
                                 self.batch_buffer.append(metrics)
+                                logger.info(f"Added 1 metric to buffer (buffer size now: {len(self.batch_buffer)})")
                                 
                                 # V2: Broadcast to WebSocket
                                 if websocket_broadcast_func:
