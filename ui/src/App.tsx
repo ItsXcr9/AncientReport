@@ -1,5 +1,6 @@
+
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp, Loader2, Clock, Wifi, WifiOff, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, TrendingUp, Loader2, Clock, Zap, HardDrive } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { CPUChart } from './components/CPUChart'
 import { MemoryChart } from './components/MemoryChart'
@@ -10,8 +11,10 @@ import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 import { AlertCenter } from './components/AlertCenter';
 import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
 import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
-import { useMetricsStore } from './stores/metricsStore';
 
+// New UI Components
+import { StatCard } from './components/ui/StatCard';
+import { Badge } from './components/ui/Badge';
 import ServerSelector from './components/ServerSelector';
 import { ServerInfoCard } from './components/ServerInfoCard'
 
@@ -42,7 +45,16 @@ interface Report {
   }
   ai_insights: {
     critical_alerts: string[]
-    recommendations: Array<{ title: string; description: string; priority: string }>
+    recommendations: Array<{ 
+      title: string; 
+      description: string; 
+      priority: string;
+      action?: string;
+      name?: string;
+      details?: string;
+      explanation?: string;
+    }>
+
     capacity_forecast: any
     config_optimizations: any[]
   }
@@ -55,13 +67,11 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [reportLoading, setReportLoading] = useState(false)
   const [lastTriggerTime, setLastTriggerTime] = useState<number | null>(() => {
-    // Load from localStorage on mount
     const stored = localStorage.getItem('lastTriggerTime')
     if (stored) {
       const time = parseInt(stored, 10)
       const COOLDOWN_MS = 5 * 60 * 1000
       const elapsed = Date.now() - time
-      // Only restore if still in cooldown
       if (elapsed < COOLDOWN_MS) {
         return time
       } else {
@@ -76,13 +86,11 @@ function App() {
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [serverInfo, setServerInfo] = useState<any>(null)
   
-  // V2 Mode: Real-time WebSocket connection
   const { isConnected: wsConnected } = useRealtimeMetrics({ 
     enabled: true,
     server: selectedServer 
   });
   
-  // Enable real-time alerts
   useRealtimeAlerts();
 
   useEffect(() => {
@@ -93,11 +101,10 @@ function App() {
       fetchServers()
       fetchHealth()
       fetchLatestReport()
-    }, 600000) // Refresh every 10 minutes
+    }, 600000)
     return () => clearInterval(interval)
   }, [])
 
-  // Refetch report when selected server changes
   useEffect(() => {
     fetchLatestReport()
   }, [selectedServer])
@@ -109,8 +116,6 @@ function App() {
         const data = await res.json()
         setServers(data.servers || [])
       }
-      
-      // Also fetch server info for the summary view
       const infoRes = await fetch('/api/servers/info')
       if (infoRes.ok) {
         const infoData = await infoRes.json()
@@ -121,21 +126,19 @@ function App() {
     }
   }
 
-  // Cooldown timer for trigger analysis button
   useEffect(() => {
     if (lastTriggerTime === null) {
       setCooldownRemaining(0)
       return
     }
 
-    const COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes in milliseconds
+    const COOLDOWN_MS = 5 * 60 * 1000
     const updateCooldown = () => {
       const elapsed = Date.now() - lastTriggerTime!
       const remaining = Math.max(0, COOLDOWN_MS - elapsed)
       setCooldownRemaining(remaining)
 
       if (remaining > 0) {
-        // Update every second
         setTimeout(updateCooldown, 1000)
       } else {
         setLastTriggerTime(null)
@@ -149,20 +152,14 @@ function App() {
   const fetchHealth = async () => {
     try {
       const res = await fetch('/api/')
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`)
-      }
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
       const data = await res.json()
       setHealth(data)
       setLoading(false)
     } catch (error) {
       console.error('Failed to fetch health:', error)
       setLoading(false)
-      setHealth({
-        status: 'offline',
-        service: 'AncientReport AI',
-        version: '1.0.0'
-      })
+      setHealth({ status: 'offline', service: 'AncientReport AI', version: '1.0.0' })
     }
   }
 
@@ -170,73 +167,23 @@ function App() {
     try {
       setReportLoading(true)
       let url = '/api/reports/latest'
-      if (selectedServer) {
-        url += `?hostname=${selectedServer}`
-      }
+      if (selectedServer) url += `?hostname=${selectedServer}`
       const res = await fetch(url)
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`)
-      }
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
       const data = await res.json()
       if (data.report_id) {
-        // Ensure top_processes structure exists with safe defaults
-        if (!data.top_processes) {
-          data.top_processes = {
-            cpu: [],
-            memory: [],
-            disk_io: [],
-            network: []
-          }
-        }
-        // Ensure arrays exist and are valid
+        if (!data.top_processes) data.top_processes = { cpu: [], memory: [], disk_io: [], network: [] }
         if (!Array.isArray(data.top_processes.cpu)) data.top_processes.cpu = []
         if (!Array.isArray(data.top_processes.memory)) data.top_processes.memory = []
         if (!Array.isArray(data.top_processes.disk_io)) data.top_processes.disk_io = []
         if (!Array.isArray(data.top_processes.network)) data.top_processes.network = []
         
-        // Debug logging for top_processes
-        console.log('Top Processes Data:', {
-          exists: !!data.top_processes,
-          cpu_count: data.top_processes?.cpu?.length || 0,
-          memory_count: data.top_processes?.memory?.length || 0,
-          disk_io_count: data.top_processes?.disk_io?.length || 0,
-          network_count: data.top_processes?.network?.length || 0,
-          cpu_sample: data.top_processes?.cpu?.[0] || null
-        })
-        
-        // Ensure ai_insights structure exists with safe defaults
-        if (!data.ai_insights) {
-          data.ai_insights = {
-            critical_alerts: [],
-            recommendations: [],
-            capacity_forecast: {},
-            config_optimizations: []
-          }
+        if (!data.ai_insights) data.ai_insights = { critical_alerts: [], recommendations: [], capacity_forecast: {}, config_optimizations: [] }
+        if (!data.ai_insights.critical_alerts) data.ai_insights.critical_alerts = []
+        else if (!Array.isArray(data.ai_insights.critical_alerts)) {
+          data.ai_insights.critical_alerts = typeof data.ai_insights.critical_alerts === 'string' ? [data.ai_insights.critical_alerts] : []
         }
-        
-        // Ensure critical_alerts is always an array
-        if (!data.ai_insights.critical_alerts) {
-          data.ai_insights.critical_alerts = []
-        } else if (!Array.isArray(data.ai_insights.critical_alerts)) {
-          // Convert to array if it's not
-          if (typeof data.ai_insights.critical_alerts === 'string') {
-            data.ai_insights.critical_alerts = [data.ai_insights.critical_alerts]
-          } else {
-            data.ai_insights.critical_alerts = []
-          }
-        }
-        
-        // Filter out empty strings
-        data.ai_insights.critical_alerts = data.ai_insights.critical_alerts.filter(
-          (alert: any) => alert && String(alert).trim()
-        )
-        
-        // Log for debugging
-        if (data.ai_insights.critical_alerts.length > 0) {
-          console.log('Critical alerts found:', data.ai_insights.critical_alerts)
-        } else {
-          console.log('No critical alerts in report')
-        }
+        data.ai_insights.critical_alerts = data.ai_insights.critical_alerts.filter((alert: any) => alert && String(alert).trim())
         
         setReport(data)
       }
@@ -248,75 +195,30 @@ function App() {
   }
 
   const triggerAnalysis = async () => {
-    // Check cooldown
-    if (cooldownRemaining > 0 || isTriggering) {
-      return
-    }
-
+    if (cooldownRemaining > 0 || isTriggering) return
     try {
       setIsTriggering(true)
       setReportLoading(true)
       const triggerTime = Date.now()
       setLastTriggerTime(triggerTime)
-      // Persist to localStorage to survive page refreshes
       localStorage.setItem('lastTriggerTime', triggerTime.toString())
       
-      console.log('Triggering analysis...', {
-        browser: navigator.userAgent,
-        timestamp: new Date().toISOString()
-      })
-      
       let url = '/api/analysis/trigger/hourly'
-      if (selectedServer) {
-        url += `?hostname=${selectedServer}`
-      }
+      if (selectedServer) url += `?hostname=${selectedServer}`
       const res = await fetch(url, { method: 'POST' })
       
-      console.log('Analysis trigger response:', {
-        status: res.status,
-        statusText: res.statusText,
-        ok: res.ok,
-        headers: Object.fromEntries(res.headers.entries())
-      })
-      
-      if (!res.ok) {
-        const errorText = await res.text()
-        console.error('Analysis trigger failed:', {
-          status: res.status,
-          statusText: res.statusText,
-          body: errorText
-        })
-        throw new Error(`Failed to trigger analysis: ${res.status} ${res.statusText}`)
-      }
+      if (!res.ok) throw new Error(`Failed to trigger analysis: ${res.status} ${res.statusText}`)
       
       const data = await res.json()
-      console.log('Analysis trigger response data:', {
-        has_report: !!data.report,
-        has_status: !!data.status,
-        report_keys: data.report ? Object.keys(data.report) : [],
-        ai_insights: data.report?.ai_insights ? {
-          has_recommendations: !!data.report.ai_insights.recommendations,
-          recommendations_count: Array.isArray(data.report.ai_insights.recommendations) ? data.report.ai_insights.recommendations.length : 'N/A',
-          recommendations_type: typeof data.report.ai_insights.recommendations
-        } : null
-      })
-      
       if (data.report) {
         setReport(data.report)
       } else {
-        // Fetch the latest report after a short delay
-        console.log('No report in response, fetching latest report in 2 seconds...')
         setTimeout(fetchLatestReport, 2000)
       }
       alert('Analysis triggered successfully!')
     } catch (error) {
-      console.error('Analysis trigger error:', error, {
-        name: error instanceof Error ? error.name : 'Unknown',
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      })
+      console.error('Analysis trigger error:', error)
       alert(`Failed to trigger analysis: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      // Reset cooldown on error so user can retry
       setLastTriggerTime(null)
       setCooldownRemaining(0)
       localStorage.removeItem('lastTriggerTime')
@@ -333,60 +235,53 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+    <div className="min-h-screen bg-deep text-white selection:bg-neon-blue/30 selection:text-neon-blue">
+      {/* Background Mesh Gradient */}
+      <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
+      
       {/* Header */}
-      <header className="border-b border-white/10 backdrop-blur-xl bg-slate-900/50">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Brain className="w-8 h-8 text-blue-400" />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                Ancient Report AI
-              </h1>
-            </div>
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 backdrop-blur-xl bg-black/20">
+        <div className="container mx-auto px-6 h-16">
+          <div className="flex items-center justify-between h-full">
             <div className="flex items-center gap-4">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                className="relative"
+              >
+                <div className="absolute inset-0 bg-neon-blue blur-lg opacity-40" />
+                <Brain className="w-8 h-8 text-neon-blue relative z-10" />
+              </motion.div>
+              <div>
+                <h1 className="text-xl font-bold font-display tracking-tight bg-gradient-to-r from-neon-blue to-neon-purple bg-clip-text text-transparent">
+                  ANCIENT REPORT
+                </h1>
+                <div className="text-[10px] text-gray-400 font-mono tracking-widest uppercase">System Intelligence v2.0</div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6">
               <ServerSelector 
                 servers={servers}
                 selectedServer={selectedServer}
                 onServerChange={setSelectedServer}
               />
               
-              {/* Alert Center */}
+              <div className="h-8 w-px bg-white/10" />
+              
               <AlertCenter />
               
-              {/* WebSocket Status Indicator */}
-              <motion.div 
-                className="flex items-center gap-2"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+              <Badge 
+                variant={wsConnected ? 'success' : 'neutral'} 
+                pulse={wsConnected}
+                className="font-mono"
               >
-                {wsConnected ? (
-                  <motion.div
-                    className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 rounded-full border border-green-500/20"
-                    initial={{ scale: 0.9 }}
-                    animate={{ scale: 1 }}
-                  >
-                    <motion.div
-                      animate={{ scale: [1, 1.2, 1] }}
-                      transition={{ repeat: Infinity, duration: 2 }}
-                    >
-                      <Zap className="w-4 h-4 text-green-400" />
-                    </motion.div>
-                    <span className="text-xs text-green-400 font-medium">V2 Live</span>
-                  </motion.div>
-                ) : (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-500/10 rounded-full border border-gray-500/20">
-                    <WifiOff className="w-4 h-4 text-gray-500" />
-                    <span className="text-xs text-gray-500">V1 Mode</span>
-                  </div>
-                )}
-              </motion.div>
+                {wsConnected ? 'V2 STREAMING' : 'V1 POLLING'}
+              </Badge>
               
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${health?.status === 'running' ? 'bg-green-400' : 'bg-red-400'}`} />
-                <span className="text-sm text-gray-400">
-                  {loading ? 'Connecting...' : health?.status || 'Offline'}
-                </span>
+              <div className="flex items-center gap-2 font-mono text-xs text-gray-400">
+                <div className={`w-1.5 h-1.5 rounded-full ${health?.status === 'running' ? 'bg-neon-green shadow-[0_0_8px_rgba(10,255,104,0.5)]' : 'bg-neon-red'}`} />
+                {loading ? 'INIT...' : (health?.status?.toUpperCase() || 'OFFLINE')}
               </div>
             </div>
           </div>
@@ -394,7 +289,8 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
+      <main className="container mx-auto px-6 pt-24 pb-12 relative z-10">
+
         {/* Server Info Card */}
         {selectedServer && (
           <div className="mb-6">
@@ -607,28 +503,120 @@ function App() {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <MetricBox 
-                        label="CPU Usage" 
-                        value={`${report.resource_usage?.cpu?.average?.toFixed(1) || 0}%`} 
-                        trend={`Peak: ${report.resource_usage?.cpu?.peak?.toFixed(1) || 0}%`} 
-                      />
-                      <MetricBox 
-                        label="Memory" 
-                        value={`${report.resource_usage?.memory?.average?.toFixed(1) || 0}%`} 
-                        trend={`Peak: ${report.resource_usage?.memory?.peak?.toFixed(1) || 0}%`} 
-                      />
-                      <MetricBox 
-                        label="Disk I/O" 
-                        value={`${((report.resource_usage?.disk_io?.reads_per_sec || 0) + (report.resource_usage?.disk_io?.writes_per_sec || 0)).toFixed(0)} IOPS`} 
-                        trend={`${report.resource_usage?.disk_io?.latency_ms?.toFixed(1) || 0}ms latency`} 
-                      />
-                      <MetricBox 
-                        label="Network" 
-                        value={`${((report.resource_usage?.network?.packets_sent || 0) + (report.resource_usage?.network?.packets_received || 0)).toLocaleString()} packets`} 
-                        trend={`${report.resource_usage?.network?.drops || 0} drops`} 
-                      />
-                    </div>
+        {/* Hero Metrics Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatCard
+            title="CPU Usage"
+            value={`${report?.resource_usage?.cpu?.average?.toFixed(1) || 0}%`}
+            icon={Cpu}
+            color="blue"
+            trend={report?.resource_usage?.cpu?.peak ? `Peak: ${report.resource_usage.cpu.peak.toFixed(1)}%` : undefined}
+            trendUp={false}
+            delay={0.1}
+          />
+          <StatCard
+            title="Memory"
+            value={`${report?.resource_usage?.memory?.average?.toFixed(1) || 0}%`}
+            icon={Brain}
+            color="purple"
+            trend={report?.resource_usage?.memory?.peak ? `Peak: ${report.resource_usage.memory.peak.toFixed(1)}%` : undefined}
+            trendUp={false}
+            delay={0.2}
+          />
+          <StatCard
+            title="Disk I/O"
+            value={`${((report?.resource_usage?.disk_io?.reads_per_sec || 0) + (report?.resource_usage?.disk_io?.writes_per_sec || 0)).toFixed(0)}`}
+            icon={HardDrive}
+            color="yellow"
+            trend={`${report?.resource_usage?.disk_io?.latency_ms?.toFixed(1) || 0}ms lat`}
+            trendUp={true}
+            delay={0.3}
+          />
+          <StatCard
+            title="Network"
+            value={`${((report?.resource_usage?.network?.packets_sent || 0) + (report?.resource_usage?.network?.packets_received || 0)).toLocaleString()}`}
+            icon={Activity}
+            color="green"
+            trend={`${report?.resource_usage?.network?.drops || 0} drops`}
+            trendUp={true}
+            delay={0.4}
+          />
+        </div>
+
+        {/* Charts Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.5 }}
+            className="glass-card rounded-xl p-1 overflow-hidden"
+          >
+            <CPUChart timeRange="1h" hostname={selectedServer} />
+          </motion.div>
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.6 }}
+            className="glass-card rounded-xl p-1 overflow-hidden"
+          >
+            <MemoryChart timeRange="1h" hostname={selectedServer} />
+          </motion.div>
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.7 }}
+            className="glass-card rounded-xl p-1 overflow-hidden"
+          >
+            <DiskIOChart timeRange="1h" hostname={selectedServer} />
+          </motion.div>
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.8 }}
+            className="glass-card rounded-xl p-1 overflow-hidden"
+          >
+            <NetworkChart timeRange="1h" hostname={selectedServer} />
+          </motion.div>
+        </div>
+
+        {/* Analysis & Insights Section */}
+        <div className="w-full mb-8">
+          <section className="w-full glass-card rounded-xl p-6 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-neon-blue via-neon-purple to-neon-blue opacity-50" />
+            
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold font-display flex items-center gap-2 text-white">
+                <Brain className="w-6 h-6 text-neon-purple" />
+                AI System Analysis
+              </h2>
+              <button
+                onClick={triggerAnalysis}
+                disabled={cooldownRemaining > 0 || isTriggering}
+                className={`
+                  px-4 py-2 rounded-lg font-medium text-sm transition-all duration-300 flex items-center gap-2
+                  ${cooldownRemaining > 0 || isTriggering
+                    ? 'bg-white/5 text-gray-500 cursor-not-allowed'
+                    : 'bg-neon-blue/10 text-neon-blue hover:bg-neon-blue/20 hover:shadow-[0_0_15px_rgba(0,243,255,0.3)] border border-neon-blue/20'}
+                `}
+              >
+                {isTriggering ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Analyzing...</span>
+                  </>
+                ) : cooldownRemaining > 0 ? (
+                  <>
+                    <Clock className="w-4 h-4" />
+                    <span>{formatCooldownTime(cooldownRemaining)}</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    <span>Trigger Analysis</span>
+                  </>
+                )}
+              </button>
+            </div>
 
                     <div className="mt-4 space-y-3">
                       <h4 className="font-semibold text-base mb-3 flex items-center gap-2">
@@ -748,116 +736,79 @@ function App() {
                       )}
                     </div>
 
-                    {(() => {
-                      try {
-                        const recommendations = report.ai_insights?.recommendations;
-                        
-                        // Validate recommendations array
-                        if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
-                          if (report.ai_insights) {
-                            console.log('No recommendations available:', {
-                              has_ai_insights: !!report.ai_insights,
-                              recommendations_type: typeof recommendations,
-                              recommendations_is_array: Array.isArray(recommendations),
-                              recommendations_length: Array.isArray(recommendations) ? recommendations.length : 'N/A',
-                              recommendations_value: recommendations
-                            });
-                          }
-                          return (
-                            <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
-                              No AI recommendations available yet.
-                            </div>
-                          );
-                        }
-                        
-                        console.log(`Rendering ${recommendations.length} recommendations`);
-                        
-                        return (
-                          <div className="mt-4 space-y-2">
-                            <h4 className="font-medium text-sm mb-2">AI Recommendations</h4>
-                            {recommendations.slice(0, 5).map((rec, i) => {
-                              try {
-                                // Handle different formats: string, object with action/details, or object with title/description
-                                let action = '';
-                                let details = '';
-                                let priority = 'medium';
-                                
-                                if (typeof rec === 'string') {
-                                  action = rec;
-                                  details = rec;
-                                } else if (typeof rec === 'object' && rec !== null) {
-                                  // Try multiple possible formats
-                                  action = rec.title || rec.action || rec.name || '';
-                                  details = rec.description || rec.details || rec.explanation || action || '';
-                                  priority = (rec.priority || 'medium').toLowerCase();
-                                  
-                                  // Validate priority
-                                  if (!['high', 'medium', 'low'].includes(priority)) {
-                                    priority = 'medium';
-                                  }
-                                } else {
-                                  console.warn(`Unexpected recommendation format at index ${i}:`, typeof rec, rec);
-                                  action = String(rec || 'Unknown recommendation');
-                                  details = action;
-                                }
-                                
-                                // Ensure we have at least a title
-                                if (!action && details) {
-                                  action = details.substring(0, 80);
-                                } else if (!action) {
-                                  action = `Recommendation ${i + 1}`;
-                                }
-                                
-                                return (
-                                  <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
-                                    <div className="flex items-start gap-2">
-                                      <span className={`font-bold ${
-                                        priority === 'high' ? 'text-red-400' :
-                                        priority === 'medium' ? 'text-yellow-400' :
-                                        'text-blue-400'
-                                      }`}>#{i + 1}</span>
-                                      <div className="flex-1">
-                                        {action && <p className="text-sm font-medium text-gray-200">{action}</p>}
-                                        {details && details !== action && (
-                                          <p className="text-xs text-gray-400 mt-1">{details}</p>
-                                        )}
+                        {/* AI Recommendations */}
+                        {(() => {
+                          try {
+                            const recommendations = report.ai_insights?.recommendations;
+                            
+                            // Validate recommendations array
+                            if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
+                              return (
+                                <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
+                                  No AI recommendations available yet.
+                                </div>
+                              );
+                            }
+                            
+                            return (
+                              <div className="mt-4 space-y-2">
+                                <h4 className="font-medium text-sm mb-2">AI Recommendations</h4>
+                                {recommendations.slice(0, 5).map((rec, i) => {
+                                  try {
+                                    let action = '';
+                                    let details = '';
+                                    let priority = 'medium';
+                                    
+                                    if (typeof rec === 'string') {
+                                      action = rec;
+                                      details = rec;
+                                    } else if (typeof rec === 'object' && rec !== null) {
+                                      action = rec.title || rec.action || rec.name || '';
+                                      details = rec.description || rec.details || rec.explanation || action || '';
+                                      priority = (rec.priority || 'medium').toLowerCase();
+                                    }
+                                    
+                                    if (!action) action = `Recommendation ${i + 1}`;
+                                    
+                                    return (
+                                      <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
+                                        <div className="flex items-start gap-2">
+                                          <span className={`font-bold ${
+                                            priority === 'high' ? 'text-red-400' :
+                                            priority === 'medium' ? 'text-yellow-400' :
+                                            'text-blue-400'
+                                          }`}>#{i + 1}</span>
+                                          <div className="flex-1">
+                                            {action && <p className="text-sm font-medium text-gray-200">{action}</p>}
+                                            {details && details !== action && (
+                                              <p className="text-xs text-gray-400 mt-1">{details}</p>
+                                            )}
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                  </div>
-                                );
-                              } catch (error) {
-                                console.error(`Error rendering recommendation ${i}:`, error, rec);
-                                return (
-                                  <div key={i} className="p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-red-400 text-sm">
-                                    Error displaying recommendation {i + 1}
-                                  </div>
-                                );
-                              }
-                            })}
-                          </div>
-                        );
-                      } catch (error) {
-                        console.error('Error rendering recommendations section:', error, {
-                          ai_insights: report.ai_insights,
-                          recommendations: report.ai_insights?.recommendations
-                        });
-                        return (
-                          <div className="mt-4 p-3 bg-red-500/10 rounded-lg border border-red-500/20 text-center text-red-400 text-sm">
-                            Error loading recommendations. Please check the console for details.
-                          </div>
-                        );
-                      }
-                    })()}
-                  </>
-                ) : (
-                  <div className="p-4 text-center text-gray-400">
-                    No report available yet. Click "Trigger Analysis" to generate one.
+                                    );
+                                  } catch (error) {
+                                    return null;
+                                  }
+                                })}
+                              </div>
+                            );
+                          } catch (error) {
+                            return null;
+                          }
+                        })()}
+                      </section>
+                      </div>
+                    </>
+                    ) : (
+                      <div className="p-4 text-center text-gray-400">
+                        No report available yet. Click "Trigger Analysis" to generate one.
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
-        </section>
-        </div>
+            </section>
+          </div>
 
         {/* Docker Containers Section - Horizontal Layout */}
         <div className="mt-8 mb-8">
@@ -905,97 +856,61 @@ function App() {
           )}
         </div>
 
-        {/* Features */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Features Grid */}
+        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
           <FeatureCard
             title="eBPF Monitoring"
-            description="Kernel-level monitoring with <3% overhead"
-            icon={<Activity className="w-8 h-8" />}
+            description="Kernel-level monitoring with <1% overhead using advanced eBPF probes."
+            icon={Activity}
+            delay={0.1}
           />
           <FeatureCard
-            title="AI Analysis"
-            description="Gemini-powered insights every hour"
-            icon={<Brain className="w-8 h-8" />}
+            title="Real-time Analysis"
+            description="AI-driven anomaly detection and performance forecasting in real-time."
+            icon={Brain}
+            delay={0.2}
           />
           <FeatureCard
-            title="Capacity Planning"
-            description="Predictive recommendations"
-            icon={<TrendingUp className="w-8 h-8" />}
-          />
-        </div>
-        {/* Status Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-8 mb-8">
-          <StatusCard
-            icon={<Activity className="w-6 h-6" />}
-            title="System Health"
-            value="Operational"
-            color="text-green-400"
-          />
-          <StatusCard
-            icon={<Server className="w-6 h-6" />}
-            title="Monitoring"
-            value="Active"
-            color="text-blue-400"
-          />
-          <StatusCard
-            icon={<Database className="w-6 h-6" />}
-            title="ClickHouse"
-            value="Online"
-            color="text-purple-400"
-          />
-          <StatusCard
-            icon={<Brain className="w-6 h-6" />}
-            title="AI Engine"
-            value="Gemini"
-            color="text-pink-400"
+            title="V2 Streaming"
+            description="High-performance NATS JetStream architecture for sub-millisecond latency."
+            icon={Zap}
+            delay={0.3}
           />
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-white/5 bg-black/20 backdrop-blur-xl py-8 mt-12">
+        <div className="container mx-auto px-6 text-center">
+          <div className="flex items-center justify-center gap-2 mb-4 opacity-50">
+            <Brain className="w-5 h-5" />
+            <span className="font-display font-bold tracking-widest">ANCIENT REPORT</span>
+          </div>
+          <p className="text-gray-500 text-sm">
+            &copy; {new Date().getFullYear()} Ancient Report AI. System Intelligence v2.0
+          </p>
+        </div>
+      </footer>
     </div>
   )
 }
 
-function StatusCard({ icon, title, value, color }: {
-  icon: React.ReactNode
-  title: string
-  value: string
-  color: string
-}) {
+// Feature Card Component
+function FeatureCard({ title, description, icon: Icon, delay = 0 }: { title: string, description: string, icon: any, delay?: number }) {
   return (
-    <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm hover:bg-white/10 transition-colors">
-      <div className={`${color} mb-3`}>{icon}</div>
-      <div className="text-sm text-gray-400 mb-1">{title}</div>
-      <div className="text-2xl font-bold">{value}</div>
-    </div>
-  )
-}
-
-function MetricBox({ label, value, trend }: {
-  label: string
-  value: string
-  trend: string
-}) {
-  return (
-    <div className="p-3 bg-white/5 rounded-lg border border-white/10">
-      <div className="text-xs text-gray-400 mb-1">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
-      <div className="text-xs text-gray-500">{trend}</div>
-    </div>
-  )
-}
-
-
-function FeatureCard({ title, description, icon }: {
-  title: string
-  description: string
-  icon: React.ReactNode
-}) {
-  return (
-    <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
-      <div className="text-blue-400 mb-4">{icon}</div>
-      <h3 className="text-lg font-semibold mb-2">{title}</h3>
-      <p className="text-sm text-gray-400">{description}</p>
-    </div>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ delay }}
+      className="glass-card p-6 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors"
+    >
+      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-neon-blue/20 to-neon-purple/20 flex items-center justify-center mb-4">
+        <Icon className="w-6 h-6 text-white" />
+      </div>
+      <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
+      <p className="text-gray-400 text-sm leading-relaxed">{description}</p>
+    </motion.div>
   )
 }
 

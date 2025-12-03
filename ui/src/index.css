@@ -1,23 +1,169 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0f172a;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Core Colors */
+  --bg-deep: #050505;
+  --bg-card: rgba(20, 20, 30, 0.6);
+  --bg-card-hover: rgba(30, 30, 45, 0.8);
+  
+  /* Neon Accents */
+  --neon-blue: #00f3ff;
+  --neon-purple: #bc13fe;
+  --neon-green: #0aff68;
+  --neon-red: #ff0055;
+  --neon-yellow: #ffd700;
+  
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, #00f3ff 0%, #0066ff 100%);
+  --gradient-secondary: linear-gradient(135deg, #bc13fe 0%, #ff006e 100%);
+  --gradient-success: linear-gradient(135deg, #0aff68 0%, #00cc88 100%);
+  --gradient-dark: linear-gradient(180deg, rgba(5,5,10,0) 0%, rgba(5,5,10,0.8) 100%);
+  
+  /* Glassmorphism */
+  --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  
+  /* Typography */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 }
 
 body {
-  margin: 0;
-  min-height: 100vh;
+  background-color: var(--bg-deep);
+  color: #e2e8f0;
+  font-family: var(--font-sans);
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(0, 243, 255, 0.08), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(188, 19, 254, 0.08), transparent 25%);
+  background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+/* Typography Overrides */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Glass Card Utility */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: var(--glass-border);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.2), 
+    0 10px 10px -5px rgba(0, 0, 0, 0.1),
+    0 0 20px rgba(0, 243, 255, 0.05); /* Subtle neon glow */
+}
+
+/* Neon Text Utilities */
+.text-neon-blue {
+  color: var(--neon-blue);
+  text-shadow: 0 0 10px rgba(0, 243, 255, 0.5);
+}
+
+.text-neon-purple {
+  color: var(--neon-purple);
+  text-shadow: 0 0 10px rgba(188, 19, 254, 0.5);
+}
+
+.text-neon-green {
+  color: var(--neon-green);
+  text-shadow: 0 0 10px rgba(10, 255, 104, 0.5);
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 15px currentColor; }
+  50% { opacity: 0.7; box-shadow: 0 0 5px currentColor; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.scanline::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent 50%, rgba(0, 243, 255, 0.02) 51%, transparent 52%);
+  pointer-events: none;
+  background-size: 100% 4px;
+  z-index: 10;
+}
+
+/* Chart Tooltip Customization */
+.recharts-tooltip-wrapper {
+  z-index: 50;
+}
+
+.custom-tooltip {
+  background: rgba(10, 10, 20, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+}
+
+/* Grid Background Pattern */
+.bg-grid-pattern {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
 }
