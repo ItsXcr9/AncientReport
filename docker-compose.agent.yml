@@ -15,12 +15,14 @@ services:
     privileged: true  # Required for eBPF
     environment:
       TZ: ${TZ:-Asia/Tehran}
-      # Central ClickHouse connection - REQUIRED
+      # Central ClickHouse connection - REQUIRED (V1 mode)
       CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:?Please set CLICKHOUSE_HOST in .env file}
       CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-6123}
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-AncientReport}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-AncientReport}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-AncientReport}
+      # V2 Mode: NATS streaming (optional, comment out to use V1 direct ClickHouse)
+      # NATS_URL: ${NATS_URL:-nats://CENTRAL_SERVER_IP:4222}
       # Agent hostname (auto-detect if not set)
       AGENT_HOSTNAME: ${AGENT_HOSTNAME:-auto-detect}
     volumes:

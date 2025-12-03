@@ -11,6 +11,7 @@ from analyzers.daily import DailyAnalyzer
 from storage.clickhouse_client import ClickHouseClient
 from storage.bucket_manager import BucketManager
 from ai.engine import AIEngine
+from ingestion_gateway import IngestionGateway
 from api import containers
 from api import healthchecks
 from utils.timezone import now, from_iso, format_for_display, format_for_chart
@@ -42,6 +43,10 @@ app.add_middleware(
 app.include_router(containers.router, prefix="/api/containers", tags=["containers"])
 app.include_router(healthchecks.router, prefix="/api", tags=["healthchecks"])
 
+# Import and register realtime WebSocket router
+from api import realtime
+app.include_router(realtime.router, tags=["realtime"])
+
 # Global instances
 clickhouse_client = None
 ai_engine = None
@@ -49,15 +54,25 @@ hourly_analyzer = None
 daily_analyzer = None
 scheduler = None
 bucket_manager = None
+ingestion_gateway = None
 latest_reports = {}  # Store the latest hourly reports per hostname
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
-    global clickhouse_client, ai_engine, hourly_analyzer, daily_analyzer, scheduler, bucket_manager
+    global clickhouse_client, ai_engine, hourly_analyzer, daily_analyzer, scheduler, bucket_manager, ingestion_gateway
     
     logger.info("🚀 Starting AncientReport AI Analysis Engine...")
+    
+    # Detect if running in V2 mode (with NATS)
+    nats_url = os.getenv("NATS_URL", "")
+    v2_mode = bool(nats_url)
+    
+    if v2_mode:
+        logger.info("🚀 Running in V2 STREAMING mode")
+    else:
+        logger.info("📊 Running in V1 LEGACY mode")
     
     # Initialize ClickHouse client
     clickhouse_client = ClickHouseClient(
@@ -135,6 +150,13 @@ async def startup_event():
         next_daily = daily_job.next_run_time
         logger.info(f"   Next daily analysis: {next_daily}")
     
+    # Start NATS ingestion gateway in V2 mode
+    if v2_mode:
+        logger.info(f"Starting NATS ingestion gateway (URL: {nats_url})...")
+        ingestion_gateway = IngestionGateway(nats_url, clickhouse_client)
+        asyncio.create_task(ingestion_gateway.start())
+        logger.info("✓ NATS ingestion gateway started")
+    
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 
 
@@ -144,6 +166,8 @@ async def shutdown_event():
     logger.info("Shutting down...")
     if scheduler:
         scheduler.shutdown()
+    if ingestion_gateway and hasattr(ingestion_gateway, 'nc') and ingestion_gateway.nc:
+        await ingestion_gateway.nc.close()
     logger.info("👋 Shutdown complete")
 
 

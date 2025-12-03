@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{info, warn, error, debug};
 
-use crate::storage::Metric;
+use crate::aggregator::Metric;
 
 // Re-export for use in main
 pub use libbpf_rs;

@@ -8,6 +8,12 @@ database = "AncientReport"
 username = "AncientReport"
 password = "AncientReport"
 
+[nats]
+# NATS JetStream URL for streaming mode (V2)
+# Leave empty or comment out to use legacy mode (direct ClickHouse writes)
+url = "nats://localhost:4222"
+enabled = true
+
 [ai]
 provider = "google"  # Options: anthropic, openai, google
 api_key = ""  # Set your API key here or use env var GEMINI_API_KEY

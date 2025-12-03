@@ -11,7 +11,8 @@ mod streaming;
 
 use config::Config;
 use aggregator::MetricAggregator;
-use collectors::{ProcCollector, DockerCollector};
+use collectors::{ProcCollector, DockerCollector, EbpfCollector};
+use streaming::StreamingPublisher;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,30 +37,32 @@ async fn main() -> Result<()> {
     let (metrics_tx, metrics_rx) = mpsc::channel(10000);
     info!("✓ Metrics channel created");
 
-    // Initialize metric aggregator
-    let mut aggregator = MetricAggregator::new(
-        &config.clickhouse.url,
-        &config.clickhouse.database,
-        config.clickhouse.username.clone(),
-        config.clickhouse.password.clone(),
-        config.agent.collection_interval,
-        metrics_rx,
-    );
-    info!("✓ Metric aggregator initialized");
+    // Check if NATS streaming is enabled (V2 mode)
+    let use_streaming = config.nats.as_ref().map(|n| n.enabled).unwrap_or(false);
+    
+    if use_streaming {
+        info!("🚀 Running in V2 STREAMING mode");
+    } else {
+        info!("📊 Running in V1 LEGACY mode (direct ClickHouse)");
+    }
 
-    // Start eBPF collectors (commented out for now)
-    // info!("Starting eBPF collectors...");
-    // let ebpf_collector = EbpfCollector::new()?;
-    // let ebpf_handle = tokio::spawn(async move {
-    //     if let Err(e) = ebpf_collector.start().await {
-    //         error!("eBPF collector error: {}", e);
-    //     }
-    // });
-    // info!("✓ eBPF collectors started");
+    // Start eBPF collectors in V2 mode
+    let ebpf_handle = if use_streaming {
+        info!("Starting eBPF collectors...");
+        let ebpf_collector = EbpfCollector::new(config.agent.hostname.clone(), metrics_tx.clone())?;
+        Some(tokio::spawn(async move {
+            if let Err(e) = ebpf_collector.start().await {
+                error!("eBPF collector error: {}", e);
+            }
+        }))
+    } else {
+        info!("ℹ️  eBPF collectors disabled in legacy mode");
+        None
+    };
 
     // Start /proc collector
     info!("Starting /proc collector...");
-    let proc_collector = ProcCollector::new(config.agent.hostname.clone(), metrics_tx);
+    let proc_collector = ProcCollector::new(config.agent.hostname.clone(), metrics_tx.clone());
     let proc_handle = tokio::spawn(async move {
         if let Err(e) = proc_collector.start().await {
             error!("/proc collector error: {}", e);
@@ -97,12 +100,50 @@ async fn main() -> Result<()> {
     });
     info!("✓ Docker collector started");
 
-    // Start aggregator
-    info!("Starting metric aggregator...");
-    let aggregator_handle = tokio::spawn(async move {
-        aggregator.start().await;
-    });
-    info!("✓ Metric aggregator started");
+    // Start aggregator or streaming publisher based on mode
+    let backend_handle = if use_streaming {
+        let nats_url = config.nats.as_ref().unwrap().url.clone();
+        info!("Starting NATS streaming publisher...");
+        info!("  NATS URL: {}", nats_url);
+        
+        match StreamingPublisher::new(&nats_url).await {
+            Ok(publisher) => {
+                info!("✓ NATS streaming publisher initialized");
+                Some(tokio::spawn(async move {
+                    publisher.start(metrics_rx).await;
+                }))
+            }
+            Err(e) => {
+                error!("Failed to initialize NATS publisher: {}", e);
+                error!("Falling back to legacy mode");
+                let mut aggregator = MetricAggregator::new(
+                    &config.clickhouse.url,
+                    &config.clickhouse.database,
+                    config.clickhouse.username.clone(),
+                    config.clickhouse.password.clone(),
+                    config.agent.collection_interval,
+                    metrics_rx,
+                );
+                Some(tokio::spawn(async move {
+                    aggregator.start().await;
+                }))
+            }
+        }
+    } else {
+        info!("Starting metric aggregator...");
+        let mut aggregator = MetricAggregator::new(
+            &config.clickhouse.url,
+            &config.clickhouse.database,
+            config.clickhouse.username.clone(),
+            config.clickhouse.password.clone(),
+            config.agent.collection_interval,
+            metrics_rx,
+        );
+        info!("✓ Metric aggregator initialized");
+        Some(tokio::spawn(async move {
+            aggregator.start().await;
+        }))
+    };
 
     info!("🎉 AncientReport AI Agent is running!");
     info!("   Monitoring system with <3% overhead");
@@ -113,7 +154,15 @@ async fn main() -> Result<()> {
     info!("Shutting down...");
 
     // Wait for all tasks to complete
-    let _ = tokio::join!(proc_handle, aggregator_handle, docker_handle);
+    if let Some(backend) = backend_handle {
+        if let Some(ebpf) = ebpf_handle {
+            let _ = tokio::join!(proc_handle, backend, docker_handle, ebpf);
+        } else {
+            let _ = tokio::join!(proc_handle, backend, docker_handle);
+        }
+    } else {
+        let _ = tokio::join!(proc_handle, docker_handle);
+    }
 
     info!("👋 AncientReport AI Agent stopped");
     Ok(())

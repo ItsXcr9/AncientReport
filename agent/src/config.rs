@@ -7,6 +7,7 @@ use std::time::Duration;
 pub struct Config {
     pub agent: AgentConfig,
     pub clickhouse: ClickHouseConfig,
+    pub nats: Option<NatsConfig>,
     pub ai: AiConfig,
     pub alerts: AlertsConfig,
 }
@@ -24,6 +25,12 @@ pub struct ClickHouseConfig {
     pub database: String,
     pub username: Option<String>,
     pub password: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct NatsConfig {
+    pub url: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -75,6 +82,7 @@ impl Default for Config {
                 username: None,
                 password: None,
             },
+            nats: None,
             ai: AiConfig {
                 provider: "anthropic".to_string(),
                 api_key: String::new(),

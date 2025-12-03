@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { Activity } from 'lucide-react';
 
 interface MetricsChartProps {
   title: string;
@@ -9,6 +10,8 @@ interface MetricsChartProps {
   yAxisLabel?: string;
   timeRange?: string;
   hostname?: string | null;
+  realtimeData?: DataPoint[];
+  isLive?: boolean;
 }
 
 interface DataPoint {
@@ -23,11 +26,14 @@ export function MetricsChart({
   color = '#3b82f6',
   yAxisLabel = 'Value',
   timeRange = '1h',
-  hostname = null
+  hostname = null,
+  realtimeData = [],
+  isLive = false
 }: MetricsChartProps) {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const MAX_REALTIME_POINTS = 100; // Keep last 100 points for real-time view
 
   const fetchData = async () => {
     try {
@@ -101,9 +107,36 @@ export function MetricsChart({
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
+    // In live mode, reduce polling frequency (WebSocket is primary)
+    // In non-live mode, poll every 30 seconds
+    const interval = setInterval(fetchData, isLive ? 60000 : 30000);
     return () => clearInterval(interval);
-  }, [endpoint, timeRange, hostname]);
+  }, [endpoint, timeRange, hostname, isLive]);
+
+  // Merge real-time data with historical data
+  useEffect(() => {
+    if (isLive && realtimeData.length > 0) {
+      setData(prevData => {
+        // Combine historical and real-time data
+        const combined = [...prevData, ...realtimeData];
+        
+        // Remove duplicates based on timestamp
+        const unique = combined.filter((point, index, self) =>
+          index === self.findIndex(p => p.timestamp === point.timestamp)
+        );
+        
+        // Sort by timestamp
+        const sorted = unique.sort((a, b) => {
+          const dateA = new Date(a.timestamp).getTime();
+          const dateB = new Date(b.timestamp).getTime();
+          return dateA - dateB;
+        });
+        
+        // Keep only the most recent points
+        return sorted.slice(-MAX_REALTIME_POINTS);
+      });
+    }
+  }, [realtimeData, isLive]);
 
   const formatXAxis = (timestamp: string) => {
     try {
@@ -171,7 +204,15 @@ export function MetricsChart({
 
   return (
     <div className="bg-white/5 rounded-xl border border-white/10 p-6 backdrop-blur-sm">
-      <h3 className="text-lg font-semibold mb-4">{title}</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        {isLive && (
+          <div className="flex items-center gap-2 text-green-400 text-sm">
+            <Activity className="w-4 h-4 animate-pulse" />
+            <span>LIVE</span>
+          </div>
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={300}>
           <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />

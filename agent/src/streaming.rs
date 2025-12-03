@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{info, warn, error};
 
-use crate::storage::Metric;
+use crate::aggregator::Metric;
 
 /// NATS streaming publisher for metrics
 /// Provides reliable metric streaming with local buffering

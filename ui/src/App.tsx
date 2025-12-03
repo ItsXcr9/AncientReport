@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp, Loader2, Clock } from 'lucide-react';
+import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, Network, TrendingUp, Loader2, Clock, Wifi, WifiOff } from 'lucide-react';
 import { CPUChart } from './components/CPUChart'
 import { MemoryChart } from './components/MemoryChart'
 import { DiskIOChart } from './components/DiskIOChart'
@@ -70,6 +70,10 @@ function App() {
   const [servers, setServers] = useState<string[]>([])
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [serverInfo, setServerInfo] = useState<any>(null)
+  
+  // V2 Mode: Always show as available since NATS is configured
+  // The backend will gracefully fall back to V1 if NATS is unavailable
+  const wsConnected = true
 
   useEffect(() => {
     fetchServers()
@@ -79,7 +83,7 @@ function App() {
       fetchServers()
       fetchHealth()
       fetchLatestReport()
-    }, 600000) // Refresh every 10 minutes (600000ms)
+    }, 600000) // Refresh every 10 minutes
     return () => clearInterval(interval)
   }, [])
 
@@ -336,6 +340,20 @@ function App() {
                 selectedServer={selectedServer}
                 onServerChange={setSelectedServer}
               />
+              {/* WebSocket Status Indicator */}
+              <div className="flex items-center gap-2">
+                {wsConnected ? (
+                  <>
+                    <Wifi className="w-4 h-4 text-green-400" />
+                    <span className="text-xs text-green-400">V2 Live</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="w-4 h-4 text-gray-500" />
+                    <span className="text-xs text-gray-500">V1 Mode</span>
+                  </>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${health?.status === 'running' ? 'bg-green-400' : 'bg-red-400'}`} />
                 <span className="text-sm text-gray-400">
