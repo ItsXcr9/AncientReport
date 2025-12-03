@@ -45,6 +45,11 @@ config = "0.14"
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 hostname = "0.3"
+libc = "0.2"
+
+# Streaming
+async-nats = "0.33"
+rmp-serde = "1.1"
 
 [build-dependencies]
 libbpf-cargo = "0.23"

@@ -7,6 +7,7 @@ mod config;
 mod collectors;
 mod aggregator;
 mod storage;
+mod streaming;
 
 use config::Config;
 use aggregator::MetricAggregator;

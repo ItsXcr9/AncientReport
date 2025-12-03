@@ -1,26 +1,40 @@
-// use libbpf_cargo::SkeletonBuilder;
-// use std::env;
-// use std::path::PathBuf;
+use libbpf_cargo::SkeletonBuilder;
+use std::env;
+use std::path::PathBuf;
 
 const EBPF_SRC: &str = "src/ebpf";
 
 fn main() {
-    // eBPF build disabled temporarily due to build environment issues
-    // let mut out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR not set"));
-    // out.push("ebpf");
+    let mut out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR not set"));
+    out.push("ebpf");
+    
+    // Create output directory
+    if let Err(e) = std::fs::create_dir_all(&out) {
+        eprintln!("Warning: Could not create eBPF output directory: {}", e);
+        return;
+    }
 
-    // // Build network monitoring eBPF program
-    // SkeletonBuilder::new()
-    //     .source(format!("{}/network.bpf.c", EBPF_SRC))
-    //     .build_and_generate(&out.join("network.skel.rs"))
-    //     .expect("Failed to build network eBPF program");
+    // Build network monitoring eBPF program
+    if let Err(e) = SkeletonBuilder::new()
+        .source(format!("{}/network.bpf.c", EBPF_SRC))
+        .build_and_generate(&out.join("network.skel.rs"))
+    {
+        eprintln!("Warning: Failed to build network eBPF program: {}", e);
+        eprintln!("eBPF features will be disabled. This requires:");
+        eprintln!("  - clang/LLVM installed");
+        eprintln!("  - linux-headers installed");
+        eprintln!("  - BPF-capable kernel (5.4+)");
+    }
 
-    // // Build disk I/O monitoring eBPF program
-    // SkeletonBuilder::new()
-    //     .source(format!("{}/diskio.bpf.c", EBPF_SRC))
-    //     .build_and_generate(&out.join("diskio.skel.rs"))
-    //     .expect("Failed to build disk I/O eBPF program");
+    // Build disk I/O monitoring eBPF program
+    if let Err(e) = SkeletonBuilder::new()
+        .source(format!("{}/diskio.bpf.c", EBPF_SRC))
+        .build_and_generate(&out.join("diskio.skel.rs"))
+    {
+        eprintln!("Warning: Failed to build diskio eBPF program: {}", e);
+    }
 
     // Tell Cargo to rerun this build script if eBPF sources change
-    println!("cargo:rerun-if-changed={}", EBPF_SRC);
+    println!("cargo:rerun-if-changed={}/network.bpf.c", EBPF_SRC);
+    println!("cargo:rerun-if-changed={}/diskio.bpf.c", EBPF_SRC);
 }
