@@ -23,7 +23,10 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
 
   const fetchHealthchecks = async () => {
     try {
-      const response = await fetch('/api/healthchecks');
+      const url = selectedServer 
+        ? `/api/healthchecks?hostname=${encodeURIComponent(selectedServer)}`
+        : '/api/healthchecks';
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch healthcheck status');
       }
@@ -40,12 +43,12 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
   };
 
   useEffect(() => {
-    // Load once on mount
+    // Load once on mount and whenever selectedServer changes
     fetchHealthchecks();
     // Then refresh every 3 minutes (180000ms) - healthchecks don't change frequently
     const interval = setInterval(fetchHealthchecks, 180000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedServer]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -102,7 +105,7 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
           <Activity className="w-5 h-5 text-blue-400" />
           Container Healthchecks
           <span className="text-sm font-normal text-gray-400 ml-2">
-            ({healthchecks.filter(hc => !selectedServer || hc.hostname === selectedServer).length} {healthchecks.filter(hc => !selectedServer || hc.hostname === selectedServer).length === 1 ? 'container' : 'containers'})
+            ({healthchecks.length} {healthchecks.length === 1 ? 'container' : 'containers'})
           </span>
         </h2>
         <div className="text-xs text-gray-400">
@@ -123,9 +126,7 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
         </div>
       ) : (
         <div className="space-y-3">
-          {healthchecks
-            .filter(hc => !selectedServer || hc.hostname === selectedServer)
-            .map((hc) => (
+          {healthchecks.map((hc) => (
             <div
               key={hc.id}
               className={`p-4 rounded-lg border ${getStatusColor(hc.health_status)}`}

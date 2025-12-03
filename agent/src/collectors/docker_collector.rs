@@ -5,15 +5,18 @@ use tracing::{info, warn, error};
 pub struct DockerCollector {
     clickhouse_url: String,
     docker_path: String,
+    hostname: String,
 }
 
 impl DockerCollector {
-    pub fn new(clickhouse_url: String) -> Self {
+    pub fn new(clickhouse_url: String, hostname: String) -> Self {
         let docker_path = Self::find_docker_binary_static();
         info!("Docker collector initialized with binary at: {}", docker_path);
+        info!("Using hostname: {}", hostname);
         Self { 
             clickhouse_url,
             docker_path,
+            hostname,
         }
     }
 
@@ -111,6 +114,10 @@ impl DockerCollector {
             // Get restart count
             let restart_count = self.get_restart_count(container_id)?;
 
+            // Get healthcheck information
+            let (health_status, health_test, failing_streak, last_health_log) = 
+                self.get_healthcheck_info(container_id)?;
+
             // Parse created_at to ClickHouse-compatible format
             // Docker format: "2025-12-01 11:52:41 +0000 UTC"
             // ClickHouse format: "2025-12-01 11:52:41"
@@ -132,6 +139,11 @@ impl DockerCollector {
                 "uptime_seconds": uptime_seconds,
                 "restart_count": restart_count,
                 "created_at": formatted_created_at,
+                "health_status": health_status,
+                "health_test": health_test,
+                "failing_streak": failing_streak,
+                "last_health_log": last_health_log,
+                "hostname": &self.hostname,
             });
 
             containers.push(container_data);
@@ -286,6 +298,59 @@ impl DockerCollector {
 
         let count_str = String::from_utf8_lossy(&inspect_output.stdout);
         Ok(count_str.trim().parse::<u32>().unwrap_or(0))
+    }
+
+    fn get_healthcheck_info(&self, container_id: &str) 
+        -> Result<(String, String, u32, String), Box<dyn std::error::Error>> {
+        
+        // Check if container has a healthcheck configured
+        let health_status_output = Command::new(&self.docker_path)
+            .args(&["inspect", container_id, "--format", "{{.State.Health.Status}}"])
+            .output()?;
+
+        if !health_status_output.status.success() {
+            return Ok(("none".to_string(), String::new(), 0, String::new()));
+        }
+
+        let health_status = String::from_utf8_lossy(&health_status_output.stdout).trim().to_string();
+        
+        // If there's no healthcheck or status is empty/none, return early
+        if health_status.is_empty() || health_status == "<no value>" || health_status == "none" {
+            return Ok(("none".to_string(), String::new(), 0, String::new()));
+        }
+
+        // Get healthcheck test command
+        let health_test_output = Command::new(&self.docker_path)
+            .args(&["inspect", container_id, "--format", "{{.Config.Healthcheck.Test}}"])
+            .output()?;
+        
+        let health_test = String::from_utf8_lossy(&health_test_output.stdout)
+            .trim()
+            .trim_matches(|c| c == '[' || c == ']')
+            .to_string();
+
+        // Get failing streak
+        let failing_streak_output = Command::new(&self.docker_path)
+            .args(&["inspect", container_id, "--format", "{{.State.Health.FailingStreak}}"])
+            .output()?;
+        
+        let failing_streak = String::from_utf8_lossy(&failing_streak_output.stdout)
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(0);
+
+        // Get last health log entry
+        let last_log_output = Command::new(&self.docker_path)
+            .args(&["inspect", container_id, "--format", "{{if .State.Health.Log}}{{(index .State.Health.Log 0).Output}}{{end}}"])
+            .output()?;
+        
+        let last_health_log = String::from_utf8_lossy(&last_log_output.stdout)
+            .trim()
+            .chars()
+            .take(500)  // Limit to 500 characters to avoid huge logs
+            .collect::<String>();
+
+        Ok((health_status, health_test, failing_streak, last_health_log))
     }
 
     fn normalize_status(&self, status: &str) -> String {

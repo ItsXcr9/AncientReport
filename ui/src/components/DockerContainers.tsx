@@ -34,7 +34,10 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ selectedServ
 
   const fetchContainers = async () => {
     try {
-      const response = await fetch('/api/containers/current');
+      const url = selectedServer 
+        ? `/api/containers/current?hostname=${encodeURIComponent(selectedServer)}`
+        : '/api/containers/current';
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch container stats');
       }
@@ -54,7 +57,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ selectedServ
     fetchContainers();
     const interval = setInterval(fetchContainers, 10000); // Refresh every 10s
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedServer]);
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -115,7 +118,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ selectedServ
           <Box className={styles.sectionTitleIcon} />
           Docker Containers
           <span className={styles.sectionCount}>
-            ({containers.filter(c => !selectedServer || c.hostname === selectedServer).length} total, {containers.filter(c => (!selectedServer || c.hostname === selectedServer) && c.status === 'running').length} running)
+            ({containers.length} total, {containers.filter(c => c.status === 'running').length} running)
           </span>
         </h2>
         <div className={styles.sectionUpdateTime}>
@@ -139,9 +142,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ selectedServ
 
       {containers.length > 0 && (
         <div className={styles.containersGrid}>
-          {containers
-            .filter(container => !selectedServer || container.hostname === selectedServer)
-            .map(container => (
+          {containers.map(container => (
             <div 
               key={container.id}
               className={`${styles.containerCard} ${

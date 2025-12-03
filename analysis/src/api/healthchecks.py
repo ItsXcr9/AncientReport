@@ -1,121 +1,122 @@
 """
-API endpoint for Docker container healthcheck status
+API endpoint for Docker container healthcheck status from ClickHouse
 """
 import os
-import subprocess
-import json
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException
-from fastapi.logger import logger
+from fastapi import APIRouter, HTTPException, Query
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-def get_docker_binary() -> str:
-    """Find Docker binary in common locations"""
-    common_paths = ["/usr/bin/docker", "/usr/local/bin/docker", "/bin/docker", "docker"]
-    for path in common_paths:
-        try:
-            result = subprocess.run([path, "--version"], capture_output=True, timeout=2)
-            if result.returncode == 0:
-                return path
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            continue
-    return "docker"  # Fallback to PATH
+# Global ClickHouse client (will be set by main.py)
+clickhouse_client = None
+
+def set_clickhouse_client(client):
+    """Set the global ClickHouse client"""
+    global clickhouse_client
+    clickhouse_client = client
 
 @router.get("/healthchecks", response_model=List[Dict[str, Any]])
-async def get_container_healthchecks():
+async def get_container_healthchecks(hostname: Optional[str] = Query(None)):
     """
     Get healthcheck status for all containers that have healthchecks configured.
     Returns only containers that have a healthcheck defined.
+    Data is fetched from ClickHouse database where agents store container stats.
+    
+    Args:
+        hostname: Optional filter to get healthchecks for a specific server
     """
-    docker_path = get_docker_binary()
+    global clickhouse_client
+    
+    if clickhouse_client is None:
+        # Fallback: create client if not set
+        from storage.clickhouse_client import ClickHouseClient
+        clickhouse_client = ClickHouseClient(
+            host=os.getenv("CLICKHOUSE_HOST", "clickhouse"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            database=os.getenv("CLICKHOUSE_DB", "AncientReport"),
+            user=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", "")
+        )
     
     try:
-        # Get all container IDs
-        ps_result = subprocess.run(
-            [docker_path, "ps", "-a", "--format", "{{.ID}}|{{.Names}}"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        # Get the latest healthcheck status for each container from ClickHouse
+        # Filter containers that have healthchecks BEFORE aggregation
+        query = """
+        SELECT 
+            container_id,
+            argMax(container_name, timestamp) as name,
+            argMax(health_status, timestamp) as health_status,
+            argMax(health_test, timestamp) as health_test,
+            argMax(failing_streak, timestamp) as failing_streak,
+            argMax(last_health_log, timestamp) as last_health_log,
+            argMax(hostname, timestamp) as hostname,
+            max(timestamp) as last_seen
+        FROM (
+            SELECT *
+            FROM docker_containers
+            WHERE timestamp > now() - INTERVAL 24 HOUR
+              AND container_id != ''
+              AND container_id IS NOT NULL
+              AND health_status != 'none'
+              AND health_status != ''
+        """
         
-        if ps_result.returncode != 0:
-            logger.error(f"Docker ps failed: {ps_result.stderr}")
-            raise HTTPException(status_code=500, detail="Failed to list containers")
+        # Add hostname filter if provided
+        if hostname:
+            query += f"\n              AND hostname = '{hostname}'"
+        
+        query += """
+        )
+        GROUP BY container_id
+        HAVING max(timestamp) > now() - INTERVAL 2 HOUR
+        ORDER BY last_seen DESC
+        """
+        
+        logger.info(f"Fetching healthchecks from ClickHouse{f' for hostname: {hostname}' if hostname else ''}")
+        results = await clickhouse_client.query(query)
+        logger.info(f"Query returned {len(results)} containers with healthchecks")
         
         containers = []
-        for line in ps_result.stdout.strip().split('\n'):
-            if not line.strip():
-                continue
-            parts = line.split('|')
-            if len(parts) < 2:
-                continue
+        for row in results:
+            container_id = row[0] if row[0] else ""
             
-            container_id = parts[0].strip()
-            container_name = parts[1].strip()
-            
-            # Check if container has healthcheck configured
-            inspect_result = subprocess.run(
-                [docker_path, "inspect", container_id, "--format", 
-                 "{{.State.Health.Status}}|{{.Config.Healthcheck.Test}}"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if inspect_result.returncode != 0:
-                # Container might not exist or no healthcheck
+            # Skip empty IDs
+            if not container_id:
                 continue
             
-            health_data = inspect_result.stdout.strip()
-            if not health_data or health_data == "none|":
-                # No healthcheck configured
+            container_name_raw = row[1] if row[1] else ""
+            health_status = row[2] if row[2] else "none"
+            health_test = row[3] if row[3] else ""
+            failing_streak = int(row[4]) if row[4] is not None else 0
+            last_health_log = row[5] if row[5] else ""
+            container_hostname = row[6] if row[6] else "unknown"
+            
+            # Clean container name - remove leading slash if present
+            container_name = container_name_raw.lstrip('/') if container_name_raw else ""
+            
+            # If no name, use container ID as the name
+            if not container_name:
+                container_name = container_id[:12]
+            
+            # Only include containers with actual healthchecks (status not 'none')
+            if health_status == "none" or health_status == "":
                 continue
-            
-            parts = health_data.split('|')
-            health_status = parts[0].strip() if len(parts) > 0 else "none"
-            health_test = parts[1].strip() if len(parts) > 1 else ""
-            
-            # Only include containers with healthcheck (status != "none")
-            if health_status == "none":
-                continue
-            
-            # Get additional healthcheck details
-            health_details = {}
-            try:
-                inspect_json = subprocess.run(
-                    [docker_path, "inspect", container_id, "--format", "{{json .State.Health}}"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if inspect_json.returncode == 0 and inspect_json.stdout.strip():
-                    health_json = json.loads(inspect_json.stdout.strip())
-                    if health_json:
-                        health_details = {
-                            "failing_streak": health_json.get("FailingStreak", 0),
-                            "log": health_json.get("Log", [])
-                        }
-            except (json.JSONDecodeError, subprocess.TimeoutExpired) as e:
-                logger.warning(f"Could not parse health details for {container_name}: {e}")
             
             containers.append({
                 "id": container_id,
                 "name": container_name,
-                "health_status": health_status,  # starting, healthy, unhealthy
+                "health_status": health_status,  # healthy, unhealthy, starting
                 "health_test": health_test,
-                "failing_streak": health_details.get("failing_streak", 0),
-                "last_log": health_details.get("log", [{}])[-1].get("Output", "") if health_details.get("log") else "",
-                "hostname": os.uname().nodename
+                "failing_streak": failing_streak,
+                "last_log": last_health_log,
+                "hostname": container_hostname
             })
         
-        logger.info(f"Found {len(containers)} containers with healthchecks")
+        logger.info(f"Returning {len(containers)} containers with healthchecks")
         return containers
         
-    except subprocess.TimeoutExpired:
-        logger.error("Docker command timed out")
-        raise HTTPException(status_code=504, detail="Docker command timed out")
     except Exception as e:
-        logger.error(f"Failed to get healthcheck status: {e}", exc_info=True)
+        logger.error(f"Failed to fetch healthcheck status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-

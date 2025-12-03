@@ -69,8 +69,9 @@ async def startup_event():
     )
     logger.info("✓ ClickHouse client initialized")
     
-    # Set ClickHouse client in containers module
+    # Set ClickHouse client in containers and healthchecks modules
     containers.set_clickhouse_client(clickhouse_client)
+    healthchecks.set_clickhouse_client(clickhouse_client)
     
     # Initialize AI engine
     ai_provider = os.getenv("AI_PROVIDER", "google")
@@ -258,13 +259,12 @@ async def get_servers_info():
             info_query = f"""
             SELECT 
                 metric_name,
-                value
+                argMax(value, timestamp) as value
             FROM metrics
             WHERE hostname = '{hostname}'
               AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
               AND timestamp >= now() - INTERVAL 1 HOUR
-            ORDER BY timestamp DESC
-            LIMIT 3
+            GROUP BY metric_name
             """
             
             result = await clickhouse_client.query_df(info_query)
@@ -305,13 +305,12 @@ async def get_server_info(hostname: str):
         info_query = f"""
         SELECT 
             metric_name,
-            value
+            argMax(value, timestamp) as value
         FROM metrics
         WHERE hostname = '{hostname}'
           AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
           AND timestamp >= now() - INTERVAL 1 HOUR
-        ORDER BY timestamp DESC
-        LIMIT 3
+        GROUP BY metric_name
         """
         
         result = await clickhouse_client.query_df(info_query)

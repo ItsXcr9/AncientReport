@@ -171,16 +171,32 @@ class ClickHouseClient:
             raise
 
     async def get_active_servers(self, hours: int = 24) -> List[str]:
-        """Get list of servers that have reported metrics recently"""
+        """Get list of servers that have reported metrics recently
+        
+        Filters out container IDs (12-char hex strings) that shouldn't be treated as hostnames
+        """
         try:
             sql = f"""
             SELECT DISTINCT hostname 
             FROM metrics 
             WHERE timestamp >= now() - INTERVAL {hours} HOUR
+              AND hostname != ''
+              AND length(hostname) != 12
             ORDER BY hostname
             """
             result = await self.query(sql)
-            return [row[0] for row in result]
+            
+            # Additional filter: exclude hostnames that look like container IDs (all hex chars)
+            servers = []
+            for row in result:
+                hostname = row[0]
+                # Skip if it looks like a container ID (12 chars, all lowercase hex)
+                if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
+                    logger.debug(f"Filtering out container ID hostname: {hostname}")
+                    continue
+                servers.append(hostname)
+            
+            return servers
         except Exception as e:
             logger.error(f"Failed to get active servers: {e}")
             return []

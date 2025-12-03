@@ -16,9 +16,12 @@ def set_clickhouse_client(client):
     clickhouse_client = client
 
 @router.get("/current", response_model=List[Dict[str, Any]])
-async def get_current_containers():
+async def get_current_containers(hostname: str = None):
     """
     Get the latest stats for all containers (running and stopped)
+    
+    Args:
+        hostname: Optional filter to get containers for a specific server
     """
     global clickhouse_client
     
@@ -34,35 +37,68 @@ async def get_current_containers():
         )
     
     try:
-        # First, get the latest record for each container_id
-        # Then we'll deduplicate by container_name to show only the most recent instance
-        query = """
-        SELECT 
-            container_id,
-            argMax(container_name, timestamp) as name,
-            argMax(image, timestamp) as image,
-            argMax(status, timestamp) as status,
-            argMax(cpu_percent, timestamp) as cpu_percent,
-            argMax(memory_usage, timestamp) as memory_usage,
-            argMax(memory_limit, timestamp) as memory_limit,
-            argMax(memory_percent, timestamp) as memory_percent,
-            argMax(network_rx_bytes, timestamp) as network_rx_bytes,
-            argMax(network_tx_bytes, timestamp) as network_tx_bytes,
-            argMax(block_read_bytes, timestamp) as block_read_bytes,
-            argMax(block_write_bytes, timestamp) as block_write_bytes,
-            argMax(uptime_seconds, timestamp) as uptime_seconds,
-            argMax(restart_count, timestamp) as restart_count,
-            argMax(created_at, timestamp) as created_at,
-            max(timestamp) as last_seen,
-            argMax(hostname, timestamp) as hostname
-        FROM docker_containers
-        WHERE timestamp > now() - INTERVAL 24 HOUR
-          AND container_id != ''
-          AND container_id IS NOT NULL
-        GROUP BY container_id
-        HAVING max(timestamp) > now() - INTERVAL 24 HOUR
-        ORDER BY last_seen DESC
-        """
+        # Build query with optional hostname filter
+        # Use subquery to filter by hostname after aggregation
+        if hostname:
+            query = f"""
+            SELECT *
+            FROM (
+                SELECT 
+                    container_id,
+                    argMax(container_name, timestamp) as name,
+                    argMax(image, timestamp) as image,
+                    argMax(status, timestamp) as status,
+                    argMax(cpu_percent, timestamp) as cpu_percent,
+                    argMax(memory_usage, timestamp) as memory_usage,
+                    argMax(memory_limit, timestamp) as memory_limit,
+                    argMax(memory_percent, timestamp) as memory_percent,
+                    argMax(network_rx_bytes, timestamp) as network_rx_bytes,
+                    argMax(network_tx_bytes, timestamp) as network_tx_bytes,
+                    argMax(block_read_bytes, timestamp) as block_read_bytes,
+                    argMax(block_write_bytes, timestamp) as block_write_bytes,
+                    argMax(uptime_seconds, timestamp) as uptime_seconds,
+                    argMax(restart_count, timestamp) as restart_count,
+                    argMax(created_at, timestamp) as created_at,
+                    max(timestamp) as last_seen,
+                    argMax(hostname, timestamp) as hostname
+                FROM docker_containers
+                WHERE timestamp > now() - INTERVAL 24 HOUR
+                  AND container_id != ''
+                  AND container_id IS NOT NULL
+                GROUP BY container_id
+                HAVING max(timestamp) > now() - INTERVAL 24 HOUR
+            )
+            WHERE hostname = '{hostname}'
+            ORDER BY last_seen DESC
+            """
+        else:
+            query = """
+            SELECT 
+                container_id,
+                argMax(container_name, timestamp) as name,
+                argMax(image, timestamp) as image,
+                argMax(status, timestamp) as status,
+                argMax(cpu_percent, timestamp) as cpu_percent,
+                argMax(memory_usage, timestamp) as memory_usage,
+                argMax(memory_limit, timestamp) as memory_limit,
+                argMax(memory_percent, timestamp) as memory_percent,
+                argMax(network_rx_bytes, timestamp) as network_rx_bytes,
+                argMax(network_tx_bytes, timestamp) as network_tx_bytes,
+                argMax(block_read_bytes, timestamp) as block_read_bytes,
+                argMax(block_write_bytes, timestamp) as block_write_bytes,
+                argMax(uptime_seconds, timestamp) as uptime_seconds,
+                argMax(restart_count, timestamp) as restart_count,
+                argMax(created_at, timestamp) as created_at,
+                max(timestamp) as last_seen,
+                argMax(hostname, timestamp) as hostname
+            FROM docker_containers
+            WHERE timestamp > now() - INTERVAL 24 HOUR
+              AND container_id != ''
+              AND container_id IS NOT NULL
+            GROUP BY container_id
+            HAVING max(timestamp) > now() - INTERVAL 24 HOUR
+            ORDER BY last_seen DESC
+            """
         
         logger.info("Fetching containers from docker_containers table...")
         # Use async query method

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sysinfo::System;
+use sysinfo::{System, Disks};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tokio::fs;
@@ -187,13 +187,12 @@ impl ProcCollector {
         }).await?;
 
         // Collect disk space metrics
-        self.system.refresh_disks_list();
-        self.system.refresh_disks();
+        let disks = Disks::new_with_refreshed_list();
         
         let mut total_space: u64 = 0;
         let mut available_space: u64 = 0;
         
-        for disk in self.system.disks() {
+        for disk in &disks {
             // Only include physical disks (skip tmpfs, devtmpfs, etc.)
             let fs_type = disk.file_system().to_string_lossy();
             if !fs_type.starts_with("tmp") && !fs_type.starts_with("dev") {

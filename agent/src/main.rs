@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     }
     
     let clickhouse_url = url.to_string();
-    let docker_collector = DockerCollector::new(clickhouse_url);
+    let docker_collector = DockerCollector::new(clickhouse_url, config.agent.hostname.clone());
     let docker_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
         loop {
