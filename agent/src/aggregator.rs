@@ -6,6 +6,7 @@ use tokio::time::interval;
 use tracing::{error, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Metric {
     pub timestamp: i64,
     pub hostname: String,
@@ -14,6 +15,7 @@ pub struct Metric {
     pub value: f64,
     pub tags: HashMap<String, String>,
 }
+
 
 pub struct MetricAggregator {
     clickhouse_url: String,

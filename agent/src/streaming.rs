@@ -96,8 +96,9 @@ impl StreamingPublisher {
         
         let count = self.buffer.len();
         
-        // Serialize to MessagePack for efficiency
-        let payload = rmp_serde::to_vec(&self.buffer)
+        // Serialize to MessagePack using named struct format (not compact array format)
+        // This ensures Python receives proper dicts with field names
+        let payload = rmp_serde::to_vec_named(&self.buffer)
             .context("Failed to serialize metrics")?;
         
         // Determine subject based on metric type

@@ -15,6 +15,7 @@ from nats.js import JetStreamContext
 from storage.clickhouse_client import ClickHouseClient
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Enable DEBUG logging for ingestion gateway
 
 # Will be set by main.py to enable WebSocket broadcasting
 websocket_broadcast_func = None
@@ -116,6 +117,9 @@ class IngestionGateway:
                             # Deserialize MessagePack payload
                             metrics = msgpack.unpackb(msg.data, raw=False)
                             
+                            # DEBUG: Log every message to see what's coming through
+                            logger.info(f"📥 Received message: type={type(metrics)}, is_list={isinstance(metrics, list)}, count={len(metrics) if isinstance(metrics, list) else 'N/A'}")
+                            
                             # Log first message
                             if not hasattr(self, '_logged_first'):
                                 logger.info(f"✅ First NATS message! Type: {type(metrics)}, Count: {len(metrics) if isinstance(metrics, list) else 1}")
@@ -125,27 +129,43 @@ class IngestionGateway:
                             
                             # Process metrics - agent sends list of Metric structs
                             if isinstance(metrics, list):
+                                logger.debug(f"Processing list of {len(metrics)} items")
                                 added_count = 0
-                                for metric in metrics:
-                                    if isinstance(metric, dict) and metric.get('hostname'):
-                                        self.batch_buffer.append(metric)
-                                        added_count += 1
-                                        
-                                        # V2: Broadcast to WebSocket clients immediately for real-time updates
-                                        if websocket_broadcast_func:
-                                            try:
-                                                await websocket_broadcast_func(metric)
-                                            except Exception as e:
-                                                logger.debug(f"WebSocket broadcast failed: {e}")
+                                skipped_count = 0
+                                for i, metric in enumerate(metrics):
+                                    logger.debug(f"  Item {i}: type={type(metric)}, is_dict={isinstance(metric, dict)}")
+                                    
+                                    # Handle nested list format (agent bug workaround)
+                                    if isinstance(metric, list) and len(metric) > 0:
+                                        logger.debug(f"  ⚠️ Unwrapping nested list at item {i}")
+                                        metric = metric[0]  # Unwrap the nested list
+                                    
+                                    if isinstance(metric, dict):
+                                        hostname = metric.get('hostname')
+                                        logger.debug(f"  Item {i}: hostname={hostname}, has_hostname={bool(hostname)}")
+                                        if hostname:
+                                            self.batch_buffer.append(metric)
+                                            added_count += 1
+                                            logger.debug(f"  ✓ Added metric: {metric.get('metric_name')} from {hostname}")
+                                            
+                                            # V2: Broadcast to WebSocket clients immediately for real-time updates
+                                            if websocket_broadcast_func:
+                                                try:
+                                                    await websocket_broadcast_func(metric)
+                                                except Exception as e:
+                                                    logger.debug(f"WebSocket broadcast failed: {e}")
+                                        else:
+                                            skipped_count += 1
+                                            logger.warning(f"  ✗ Skipping metric (no hostname): {metric.get('metric_name', 'unknown')}")
                                     else:
-                                        logger.debug(f"Skipping metric: is_dict={isinstance(metric, dict)}, type={type(metric)}")
+                                        skipped_count += 1
+                                        logger.warning(f"  ✗ Skipping non-dict item: type={type(metric)}")
                                 
-                                if added_count > 0:
-                                    logger.info(f"Added {added_count} metrics to buffer (buffer size now: {len(self.batch_buffer)})")
+                                logger.info(f"📊 Processed list: added={added_count}, skipped={skipped_count}, buffer_size={len(self.batch_buffer)}")
                                                 
                             elif isinstance(metrics, dict) and metrics.get('hostname'):
                                 self.batch_buffer.append(metrics)
-                                logger.info(f"Added 1 metric to buffer (buffer size now: {len(self.batch_buffer)})")
+                                logger.info(f"Added 1 dict metric to buffer (buffer size now: {len(self.batch_buffer)})")
                                 
                                 # V2: Broadcast to WebSocket
                                 if websocket_broadcast_func:
@@ -153,6 +173,8 @@ class IngestionGateway:
                                         await websocket_broadcast_func(metrics)
                                     except Exception as e:
                                         logger.debug(f"WebSocket broadcast failed: {e}")
+                            else:
+                                logger.warning(f"⚠️ Unhandled message format: type={type(metrics)}, has_hostname={'hostname' in metrics if isinstance(metrics, dict) else 'N/A'}")
                             
                             # IMPORTANT: Always ack() after successful processing
                             await msg.ack()
