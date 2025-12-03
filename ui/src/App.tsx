@@ -355,33 +355,7 @@ function App() {
             <ServerInfoCard selectedServer={selectedServer} />
           </div>
         )}
-        {/* Status Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <StatusCard
-            icon={<Activity className="w-6 h-6" />}
-            title="System Health"
-            value="Operational"
-            color="text-green-400"
-          />
-          <StatusCard
-            icon={<Server className="w-6 h-6" />}
-            title="Monitoring"
-            value="Active"
-            color="text-blue-400"
-          />
-          <StatusCard
-            icon={<Database className="w-6 h-6" />}
-            title="ClickHouse"
-            value="Online"
-            color="text-purple-400"
-          />
-          <StatusCard
-            icon={<Brain className="w-6 h-6" />}
-            title="AI Engine"
-            value="Gemini"
-            color="text-pink-400"
-          />
-        </div>
+
 
         {/* Latest Analysis Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -901,6 +875,33 @@ function App() {
             title="Capacity Planning"
             description="Predictive recommendations"
             icon={<TrendingUp className="w-8 h-8" />}
+          />
+        </div>
+        {/* Status Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-8 mb-8">
+          <StatusCard
+            icon={<Activity className="w-6 h-6" />}
+            title="System Health"
+            value="Operational"
+            color="text-green-400"
+          />
+          <StatusCard
+            icon={<Server className="w-6 h-6" />}
+            title="Monitoring"
+            value="Active"
+            color="text-blue-400"
+          />
+          <StatusCard
+            icon={<Database className="w-6 h-6" />}
+            title="ClickHouse"
+            value="Online"
+            color="text-purple-400"
+          />
+          <StatusCard
+            icon={<Brain className="w-6 h-6" />}
+            title="AI Engine"
+            value="Gemini"
+            color="text-pink-400"
           />
         </div>
       </main>
