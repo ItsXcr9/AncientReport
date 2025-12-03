@@ -192,13 +192,34 @@ impl ProcCollector {
         let mut total_space: u64 = 0;
         let mut available_space: u64 = 0;
         
+        let mut unique_devices = std::collections::HashSet::new();
+        
         for disk in &disks {
-            // Only include physical disks (skip tmpfs, devtmpfs, etc.)
-            let fs_type = disk.file_system().to_string_lossy();
-            if !fs_type.starts_with("tmp") && !fs_type.starts_with("dev") {
-                total_space += disk.total_space();
-                available_space += disk.available_space();
+            // Get filesystem type and convert to lowercase for case-insensitive comparison
+            let fs_type = disk.file_system().to_string_lossy().to_lowercase();
+            let device_name = disk.name().to_string_lossy();
+            
+            // Skip common pseudo-filesystems and read-only loop devices
+            // overlay: Docker overlay filesystems (duplicates host storage)
+            // squashfs: Snap packages (read-only compressed)
+            // tmpfs/devtmpfs: In-memory filesystems
+            // auffs/overlayfs: Union filesystems
+            if fs_type.starts_with("tmp") || 
+               fs_type.starts_with("dev") || 
+               fs_type.contains("overlay") || 
+               fs_type.contains("squashfs") ||
+               fs_type.contains("aufs") {
+                continue;
             }
+            
+            // Avoid double counting the same device mounted in multiple locations
+            // We use the device name as the unique identifier
+            if !unique_devices.insert(device_name.to_string()) {
+                continue;
+            }
+
+            total_space += disk.total_space();
+            available_space += disk.available_space();
         }
         
         let used_space = total_space.saturating_sub(available_space);
