@@ -10,6 +10,7 @@ from analyzers.hourly import HourlyAnalyzer
 from analyzers.daily import DailyAnalyzer
 from storage.clickhouse_client import ClickHouseClient
 from storage.bucket_manager import BucketManager
+from storage.settings_manager import init_settings_manager, get_settings_manager
 from ai.engine import AIEngine
 from ingestion_gateway import IngestionGateway
 from api import containers
@@ -55,13 +56,14 @@ daily_analyzer = None
 scheduler = None
 bucket_manager = None
 ingestion_gateway = None
+settings_manager = None
 latest_reports = {}  # Store the latest hourly reports per hostname
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
-    global clickhouse_client, ai_engine, hourly_analyzer, daily_analyzer, scheduler, bucket_manager, ingestion_gateway
+    global clickhouse_client, ai_engine, hourly_analyzer, daily_analyzer, scheduler, bucket_manager, ingestion_gateway, settings_manager
     
     logger.info("🚀 Starting AncientReport AI Analysis Engine...")
     
@@ -102,6 +104,10 @@ async def startup_event():
     # Initialize bucket manager
     bucket_manager = BucketManager()
     logger.info("✓ Bucket manager initialized")
+    
+    # Initialize settings manager
+    settings_manager = init_settings_manager(clickhouse_client)
+    logger.info("✓ Settings manager initialized")
     
     # Initialize scheduler
     scheduler = AsyncIOScheduler()
@@ -935,6 +941,72 @@ async def debug_metrics_detail():
             "status": "error",
             "error": str(e)
         }
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """Get application settings (sensitive values masked)"""
+    try:
+        global settings_manager
+        if not settings_manager:
+            raise HTTPException(status_code=503, detail="Settings manager not initialized")
+        
+        settings = settings_manager.get_all_settings(mask_sensitive=True)
+        
+        # Ensure all required keys exist with defaults
+        defaults = {
+            "telegram_bot_token": "",
+            "telegram_chat_id": "",
+            "telegram_alerts_enabled": "true",
+            "gemini_api_key": ""
+        }
+        
+        for key, default_value in defaults.items():
+            if key not in settings:
+                settings[key] = default_value
+        
+        return {"settings": settings}
+    except Exception as e:
+        logger.error(f"Failed to get settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/settings")
+async def update_settings(settings: dict):
+    """Update application settings"""
+    try:
+        global settings_manager, ai_engine
+        if not settings_manager:
+            raise HTTPException(status_code=503, detail="Settings manager not initialized")
+        
+        # Validate and update each setting
+        for key, value in settings.items():
+            if key in ["telegram_bot_token", "telegram_chat_id", "telegram_alerts_enabled", "gemini_api_key"]:
+                settings_manager.set_setting(key, str(value))
+        
+        # If Gemini API key was updated, reinitialize AI engine
+        if "gemini_api_key" in settings:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=settings["gemini_api_key"])
+                logger.info("✓ Gemini API key updated")
+            except Exception as e:
+                logger.warning(f"Failed to reconfigure Gemini API: {e}")
+        
+        # If Telegram settings changed, reload telegram notifier
+        if any(k in settings for k in ["telegram_bot_token", "telegram_chat_id", "telegram_alerts_enabled"]):
+            try:
+                from alerts.telegram_notifier import reload_telegram_notifier
+                reload_telegram_notifier()
+                logger.info("✓ Telegram notifier reloaded")
+            except Exception as e:
+                logger.warning(f"Failed to reload Telegram notifier: {e}")
+        
+        return {"status": "success", "message": "Settings updated successfully"}
+    except Exception as e:
+        logger.error(f"Failed to update settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 if __name__ == "__main__":

@@ -87,3 +87,11 @@ CREATE TABLE IF NOT EXISTS docker_containers (
 ) ENGINE = MergeTree()
 ORDER BY (timestamp, container_id)
 TTL timestamp + INTERVAL 30 DAY;
+
+-- Application settings (key-value store)
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key String,
+    setting_value String,
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY setting_key;

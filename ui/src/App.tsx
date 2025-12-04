@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, TrendingUp, Loader2, Clock, Zap, HardDrive } from 'lucide-react';
+import { Activity, AlertTriangle, AlertCircle, CheckCircle, Server, Brain, Cpu, Database, TrendingUp, Loader2, Clock, Zap, HardDrive, Settings } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { CPUChart } from './components/CPUChart'
 import { MemoryChart } from './components/MemoryChart'
@@ -9,6 +9,7 @@ import { NetworkChart } from './components/NetworkChart'
 import { DockerContainers } from './components/DockerContainers';
 import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 import { AlertCenter } from './components/AlertCenter';
+import { SettingsModal } from './components/SettingsModal';
 import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
 import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
 
@@ -85,6 +86,7 @@ function App() {
   const [servers, setServers] = useState<string[]>([])
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [serverInfo, setServerInfo] = useState<any>(null)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   
   const { isConnected: wsConnected } = useRealtimeMetrics({ 
     enabled: true,
@@ -239,6 +241,9 @@ function App() {
       {/* Background Mesh Gradient */}
       <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
       
+      {/* Settings Modal */}
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 glass-header">
         <div className="container mx-auto px-6 h-16">
@@ -270,6 +275,14 @@ function App() {
               <div className="h-8 w-px bg-white/10" />
               
               <AlertCenter />
+              
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="p-2 hover:bg-white/5 rounded-lg transition-colors group"
+                title="Settings"
+              >
+                <Settings className="w-5 h-5 text-gray-400 group-hover:text-neon-blue transition-colors" />
+              </button>
               
               <Badge 
                 variant={wsConnected ? 'success' : 'neutral'} 

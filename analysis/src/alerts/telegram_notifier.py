@@ -22,14 +22,53 @@ class TelegramNotifier:
             bot_token: Telegram bot token (or use TELEGRAM_BOT_TOKEN env var)
             chat_id: Telegram chat ID (or use TELEGRAM_CHAT_ID env var)
         """
-        self.bot_token = bot_token or os.getenv('TELEGRAM_BOT_TOKEN')
-        self.chat_id = chat_id or os.getenv('TELEGRAM_CHAT_ID')
-        self.enabled = bool(self.bot_token and self.chat_id)
+        self.bot_token = bot_token or self._get_from_db_or_env('telegram_bot_token', 'TELEGRAM_BOT_TOKEN')
+        self.chat_id = chat_id or self._get_from_db_or_env('telegram_chat_id', 'TELEGRAM_CHAT_ID')
+        self.alerts_enabled = self._get_alerts_enabled()
+        self.enabled = bool(self.bot_token and self.chat_id and self.alerts_enabled)
         
         if not self.enabled:
-            logger.warning("Telegram notifications disabled: BOT_TOKEN or CHAT_ID not configured")
+            if not self.alerts_enabled:
+                logger.warning("Telegram notifications disabled via settings")
+            else:
+                logger.warning("Telegram notifications disabled: BOT_TOKEN or CHAT_ID not configured")
         else:
             logger.info(f"Telegram notifications enabled for chat ID: {self.chat_id}")
+    
+    def _get_from_db_or_env(self, db_key: str, env_key: str) -> Optional[str]:
+        """Try to get value from settings manager, fall back to environment variable"""
+        try:
+            from storage.settings_manager import get_settings_manager
+            settings_manager = get_settings_manager()
+            if settings_manager:
+                value = settings_manager.get_setting(db_key)
+                if value:
+                    return value
+        except Exception as e:
+            logger.debug(f"Could not read {db_key} from database: {e}")
+        
+        return os.getenv(env_key)
+    
+    def _get_alerts_enabled(self) -> bool:
+        """Check if alerts are enabled"""
+        try:
+            from storage.settings_manager import get_settings_manager
+            settings_manager = get_settings_manager()
+            if settings_manager:
+                enabled_str = settings_manager.get_setting('telegram_alerts_enabled', 'true')
+                return enabled_str.lower() in ['true', '1', 'yes', 'on']
+        except Exception as e:
+            logger.debug(f"Could not read telegram_alerts_enabled from database: {e}")
+        
+        return True  # Default to enabled
+    
+    def reload(self):
+        """Reload configuration from database"""
+        self.bot_token = self._get_from_db_or_env('telegram_bot_token', 'TELEGRAM_BOT_TOKEN')
+        self.chat_id = self._get_from_db_or_env('telegram_chat_id', 'TELEGRAM_CHAT_ID')
+        self.alerts_enabled = self._get_alerts_enabled()
+        self.enabled = bool(self.bot_token and self.chat_id and self.alerts_enabled)
+        logger.info(f"Telegram notifier reloaded. Enabled: {self.enabled}")
     
     def _get_emoji(self, level: str) -> str:
         """Get emoji for alert level"""
@@ -51,20 +90,20 @@ class TelegramNotifier:
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         
         # Build message
-        text = f"{emoji} *{level} ALERT*\n\n"
-        text += f"*{title}*\n"
-        text += f"{message}\n\n"
-        text += f"🖥️ Server: `{server}`\n"
+        text = f"{emoji} *{level} ALERT*\\n\\n"
+        text += f"*{title}*\\n"
+        text += f"{message}\\n\\n"
+        text += f"🖥️ Server: `{server}`\\n"
         
         # Add metric details if available
         if alert.get('metric'):
-            text += f"📊 Metric: `{alert['metric']}`\n"
+            text += f"📊 Metric: `{alert['metric']}`\\n"
         if alert.get('value') is not None:
-            text += f"📈 Value: `{alert['value']}`\n"
+            text += f"📈 Value: `{alert['value']}`\\n"
         if alert.get('threshold') is not None:
-            text += f"⚖️ Threshold: `{alert['threshold']}`\n"
+            text += f"⚖️ Threshold: `{alert['threshold']}`\\n"
         
-        text += f"\n🕐 {timestamp}"
+        text += f"\\n🕐 {timestamp}"
         
         return text
     
@@ -79,7 +118,7 @@ class TelegramNotifier:
             True if sent successfully, False otherwise
         """
         if not self.enabled:
-            logger.debug("Telegram not configured, skipping notification")
+            logger.debug("Telegram not configured or disabled, skipping notification")
             return False
         
         try:
@@ -122,13 +161,13 @@ class TelegramNotifier:
         
         try:
             emoji = '✅' if status.get('healthy', True) else '🚨'
-            text = f"{emoji} *System Status Update*\n\n"
+            text = f"{emoji} *System Status Update*\\n\\n"
             
             for key, value in status.items():
                 if key != 'healthy':
-                    text += f"• {key}: `{value}`\n"
+                    text += f"• {key}: `{value}`\\n"
             
-            text += f"\n🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            text += f"\\n🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
             
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             payload = {
@@ -156,6 +195,15 @@ def get_telegram_notifier() -> TelegramNotifier:
     if _telegram_notifier is None:
         _telegram_notifier = TelegramNotifier()
     return _telegram_notifier
+
+
+def reload_telegram_notifier():
+    """Reload the global Telegram notifier configuration"""
+    global _telegram_notifier
+    if _telegram_notifier is not None:
+        _telegram_notifier.reload()
+    else:
+        _telegram_notifier = TelegramNotifier()
 
 
 async def send_telegram_alert(alert: dict) -> bool:

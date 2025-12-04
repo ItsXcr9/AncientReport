@@ -1,5 +1,5 @@
 # Stage 1: Build Rust binary
-FROM rust:1.83-slim AS builder
+FROM rust:latest AS builder
 
 ENV BPFTOOL=/usr/sbin/bpftool
 
