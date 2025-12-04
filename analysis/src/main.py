@@ -15,7 +15,7 @@ from ai.engine import AIEngine
 from ingestion_gateway import IngestionGateway
 from api import containers
 from api import healthchecks
-from utils.timezone import now, from_iso, format_for_display, format_for_chart
+from utils.timezone import now, from_iso, format_for_display, format_for_chart, TEHRAN_TZ
 
 # Configure logging
 logging.basicConfig(

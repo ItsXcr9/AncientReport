@@ -22,3 +22,4 @@ INSERT INTO AncientReport.settings (setting_key, setting_value, category, descri
 ('max_alerts_history', '100', 'alerts', 'Maximum alerts to keep in history');
 
 
+
