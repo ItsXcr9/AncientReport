@@ -11,6 +11,8 @@ services:
       - "8222:8222"
     volumes:
       - nats-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - AncientReport
     restart: unless-stopped
@@ -29,6 +31,8 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
     environment:
       TZ: Asia/Tehran
       CLICKHOUSE_DB: AncientReport
@@ -101,6 +105,8 @@ services:
       NATS_URL: nats://nats:4222
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       - clickhouse
       - nats
@@ -124,6 +130,9 @@ services:
     environment:
       TZ: Asia/Tehran
       REACT_APP_API_URL: http://localhost:8000
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       - analysis
     networks:

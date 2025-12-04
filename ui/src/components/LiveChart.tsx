@@ -135,23 +135,16 @@ export function LiveChart({
 
   const formatXAxis = (timestamp: string) => {
     try {
-      // Backend sends timestamps in Tehran timezone (ISO format with +03:30 offset)
-      // Extract time directly from the string to avoid browser timezone conversion
-      // Format: "2025-12-04T14:41:00+03:30" - we want "14:41"
-      const match = timestamp.match(/T(\d{2}):(\d{2})/);
-      if (match) {
-        return `${match[1]}:${match[2]}`;
-      }
-      // Fallback: parse and extract (still avoids locale conversion)
       const date = new Date(timestamp);
       if (!isNaN(date.getTime())) {
-        // Extract hours/minutes from the original Tehran time in the string
-        const parts = timestamp.split('T')[1]?.split(':');
-        if (parts && parts.length >= 2) {
-          return `${parts[0]}:${parts[1]}`;
-        }
+        return date.toLocaleTimeString('en-US', { 
+          timeZone: 'Asia/Tehran',
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: false 
+        });
       }
-      return timestamp.substring(11, 16) || timestamp;
+      return timestamp;
     } catch (e) {
       return timestamp;
     }
@@ -159,12 +152,18 @@ export function LiveChart({
 
   const formatTooltipLabel = (timestamp: string) => {
     try {
-      // Extract date and time from Tehran timestamp string
-      // Format: "2025-12-04T14:41:00+03:30"
-      const [datePart, timePart] = timestamp.split('T');
-      if (datePart && timePart) {
-        const time = timePart.substring(0, 8); // "14:41:00"
-        return `${datePart} ${time} (Tehran)`;
+      const date = new Date(timestamp);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleString('en-US', { 
+          timeZone: 'Asia/Tehran',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false 
+        }) + ' (Tehran)';
       }
       return timestamp;
     } catch (e) {

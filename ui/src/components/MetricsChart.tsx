@@ -140,15 +140,16 @@ export function MetricsChart({
 
   const formatXAxis = (timestamp: string) => {
     try {
-      // Backend sends timestamps in Tehran timezone (ISO format with +03:30 offset)
-      // Extract time directly from the string to avoid browser timezone conversion
-      // Format: "2025-12-04T14:41:00+03:30" - we want "14:41"
-      const match = timestamp.match(/T(\d{2}):(\d{2})/);
-      if (match) {
-        return `${match[1]}:${match[2]}`;
+      const date = new Date(timestamp);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleTimeString('en-US', { 
+          timeZone: 'Asia/Tehran',
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: false 
+        });
       }
-      // Fallback: try to extract from the string directly
-      return timestamp.substring(11, 16) || timestamp;
+      return timestamp;
     } catch (e) {
       console.warn(`[${title}] Error formatting timestamp:`, timestamp, e);
       return timestamp;
@@ -157,11 +158,18 @@ export function MetricsChart({
 
   const formatTooltipLabel = (timestamp: string) => {
     try {
-      // Extract date and time from Tehran timestamp string
-      const [datePart, timePart] = timestamp.split('T');
-      if (datePart && timePart) {
-        const time = timePart.substring(0, 8);
-        return `${datePart} ${time} (Tehran)`;
+      const date = new Date(timestamp);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleString('en-US', { 
+          timeZone: 'Asia/Tehran',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false 
+        }) + ' (Tehran)';
       }
       return timestamp;
     } catch (e) {

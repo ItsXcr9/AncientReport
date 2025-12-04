@@ -495,12 +495,11 @@ async def get_cpu_metrics(start: str = None, end: str = None, hostname: str = No
                 timestamp = row[0]
                 value = row[1]
                 
-                # Convert timestamp to ISO string in Tehran timezone for chart
+                # ClickHouse with TZ=Asia/Tehran returns Tehran timestamps (not UTC)
                 if isinstance(timestamp, datetime):
-                    # ClickHouse returns UTC timestamps, convert to Tehran for display
                     if timestamp.tzinfo is None:
-                        from datetime import timezone as tz
-                        timestamp = timestamp.replace(tzinfo=tz.utc)
+                        # Naive datetime from ClickHouse is already in Tehran time
+                        timestamp = TEHRAN_TZ.localize(timestamp)
                     timestamp_str = format_for_chart(timestamp)
                 else:
                     # If it's already a string, try to parse and reformat
@@ -542,14 +541,14 @@ async def get_memory_metrics(start: str = None, end: str = None, hostname: str =
         # Pass Tehran time directly
         data = await clickhouse_client.get_metrics_raw(start_time, end_time, "memory_usage_percent", hostname=hostname)
         
-        # Format for frontend - convert UTC timestamps back to Tehran timezone
+        # Format for frontend - ClickHouse with TZ=Asia/Tehran returns Tehran timestamps
         formatted = []
         for row in data:
             timestamp = row[0]
             if isinstance(timestamp, datetime):
                 if timestamp.tzinfo is None:
-                    from datetime import timezone as tz
-                    timestamp = timestamp.replace(tzinfo=tz.utc)
+                    # Naive datetime from ClickHouse is already in Tehran time
+                    timestamp = TEHRAN_TZ.localize(timestamp)
                 timestamp_str = format_for_chart(timestamp)
             else:
                 try:
@@ -591,8 +590,8 @@ async def get_disk_metrics(start: str = None, end: str = None, hostname: str = N
             timestamp = row[0]
             if isinstance(timestamp, datetime):
                 if timestamp.tzinfo is None:
-                    from datetime import timezone as tz
-                    timestamp = timestamp.replace(tzinfo=tz.utc)
+                    # ClickHouse with TZ=Asia/Tehran returns Tehran timestamps
+                    timestamp = TEHRAN_TZ.localize(timestamp)
                 timestamp_str = format_for_chart(timestamp)
             else:
                 try:
@@ -609,8 +608,8 @@ async def get_disk_metrics(start: str = None, end: str = None, hostname: str = N
             timestamp = row[0]
             if isinstance(timestamp, datetime):
                 if timestamp.tzinfo is None:
-                    from datetime import timezone as tz
-                    timestamp = timestamp.replace(tzinfo=tz.utc)
+                    # ClickHouse with TZ=Asia/Tehran returns Tehran timestamps
+                    timestamp = TEHRAN_TZ.localize(timestamp)
                 timestamp_str = format_for_chart(timestamp)
             else:
                 try:
@@ -657,8 +656,8 @@ async def get_network_metrics(start: str = None, end: str = None, hostname: str 
             timestamp = row[0]
             if isinstance(timestamp, datetime):
                 if timestamp.tzinfo is None:
-                    from datetime import timezone as tz
-                    timestamp = timestamp.replace(tzinfo=tz.utc)
+                    # ClickHouse with TZ=Asia/Tehran returns Tehran timestamps
+                    timestamp = TEHRAN_TZ.localize(timestamp)
                 timestamp_str = format_for_chart(timestamp)
             else:
                 try:
@@ -675,8 +674,8 @@ async def get_network_metrics(start: str = None, end: str = None, hostname: str 
             timestamp = row[0]
             if isinstance(timestamp, datetime):
                 if timestamp.tzinfo is None:
-                    from datetime import timezone as tz
-                    timestamp = timestamp.replace(tzinfo=tz.utc)
+                    # ClickHouse with TZ=Asia/Tehran returns Tehran timestamps
+                    timestamp = TEHRAN_TZ.localize(timestamp)
                 timestamp_str = format_for_chart(timestamp)
             else:
                 try:
