@@ -10,6 +10,7 @@ import { DockerContainers } from './components/DockerContainers';
 import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 import { AlertCenter } from './components/AlertCenter';
 import { SettingsModal } from './components/SettingsModal';
+import { MonitorResultsWidget } from './components/MonitorResultsWidget';
 import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
 import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
 
@@ -792,9 +793,17 @@ function App() {
           <DockerContainers selectedServer={selectedServer} />
         </div>
 
-        {/* Container Healthchecks Section */}
-        <div className="mt-8 mb-8">
-          <ContainerHealthchecks selectedServer={selectedServer} />
+        {/* Custom Monitors & Healthchecks Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8 mb-8">
+          {/* Custom Monitors Widget */}
+          <div className="lg:col-span-1">
+            <MonitorResultsWidget />
+          </div>
+          
+          {/* Container Healthchecks */}
+          <div className="lg:col-span-2">
+            <ContainerHealthchecks selectedServer={selectedServer} />
+          </div>
         </div>
 
         {/* Metrics History Charts */}
