@@ -35,6 +35,11 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://65.109.200.75:5515"
+        tag: "{{.Name}}"
 
 # Note: This docker-compose file does NOT create any networks or volumes
 # The agent connects directly to the central ClickHouse server over the network

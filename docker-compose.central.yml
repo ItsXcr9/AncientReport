@@ -17,6 +17,11 @@ services:
     networks:
       - AncientReport
     restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://65.109.200.75:5515"
+        tag: "{{.Name}}"
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -36,6 +41,11 @@ services:
     networks:
       - AncientReport
     restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://65.109.200.75:5515"
+        tag: "{{.Name}}"
 
   # Python analysis engine
   analysis:
@@ -65,6 +75,11 @@ services:
     networks:
       - AncientReport
     restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://65.109.200.75:5515"
+        tag: "{{.Name}}"
 
   # React frontend
   ui:
@@ -82,6 +97,11 @@ services:
     networks:
       - AncientReport
     restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://65.109.200.75:5515"
+        tag: "{{.Name}}"
 
 volumes:
   nats_data:
