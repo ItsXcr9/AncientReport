@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 # Remote Agent - Deploy on each monitored server
 # This agent collects metrics and sends them to the central ClickHouse server
@@ -11,8 +11,8 @@ services:
       dockerfile: Dockerfile
     container_name: AncientReport-agent
     network_mode: host
-    pid: "host"  # Required to see host processes, not container processes
-    privileged: true  # Required for eBPF
+    pid: "host" # Required to see host processes, not container processes
+    privileged: true # Required for eBPF
     environment:
       TZ: ${TZ:-Asia/Tehran}
       # Central ClickHouse connection - REQUIRED (V1 mode)
@@ -21,8 +21,11 @@ services:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-AncientReport}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-AncientReport}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-AncientReport}
-      # V2 Mode: NATS streaming (optional, comment out to use V1 direct ClickHouse)
-      # NATS_URL: ${NATS_URL:-nats://CENTRAL_SERVER_IP:4222}
+      # V2 Mode: NATS streaming - REQUIRED for V2 mode
+      # Set NATS_URL in .env file (e.g., NATS_URL=nats://65.109.200.75:4222)
+      # Or comment out both lines below to use V1 direct ClickHouse mode
+      NATS_URL: ${NATS_URL}
+      NATS_ENABLED: ${NATS_ENABLED:-true}
       # Agent hostname (auto-detect if not set)
       AGENT_HOSTNAME: ${AGENT_HOSTNAME:-auto-detect}
     volumes:
@@ -40,6 +43,5 @@ services:
       options:
         syslog-address: "udp://65.109.200.75:5515"
         tag: "{{.Name}}"
-
 # Note: This docker-compose file does NOT create any networks or volumes
 # The agent connects directly to the central ClickHouse server over the network

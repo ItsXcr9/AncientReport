@@ -64,6 +64,8 @@ services:
       CLICKHOUSE_DB: AncientReport
       CLICKHOUSE_USER: AncientReport
       CLICKHOUSE_PASSWORD: AncientReport
+      NATS_URL: nats://localhost:4222
+      NATS_ENABLED: ${NATS_ENABLED:-true}
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /proc:/host/proc:ro

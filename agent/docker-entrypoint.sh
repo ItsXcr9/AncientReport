@@ -5,7 +5,6 @@ set -e
 mkdir -p /etc/AncientReport
 
 # Determine config file source
-# Determine config file source
 CONFIG_SOURCE=""
 if [ -f /etc/AncientReport/config-source/config.toml ]; then
     # Use mounted config file if it exists
@@ -26,31 +25,98 @@ if [ -n "$CONFIG_SOURCE" ] && [ -f "$CONFIG_SOURCE" ]; then
     cp "$CONFIG_SOURCE" /etc/AncientReport/config.toml
     echo "Using config from: $CONFIG_SOURCE"
     
+    # Function to update TOML value in a specific section
+    update_toml_value() {
+        local section=$1
+        local key=$2
+        local value=$3
+        local file=$4
+        
+        # Use awk to update value only in the specified section
+        awk -v section="[$section]" -v key="$key" -v value="$value" '
+        BEGIN { in_section=0 }
+        /^\[.*\]/ {
+            if ($0 == section) {
+                in_section=1
+            } else {
+                in_section=0
+            }
+            print
+            next
+        }
+        in_section && $0 ~ "^" key " *=" {
+            print key " = \"" value "\""
+            next
+        }
+        { print }
+        ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    }
+    
     # Apply environment variable overrides if they exist
+    
+    # ClickHouse configuration
     if [ -n "$CLICKHOUSE_HOST" ]; then
         echo "Configuring ClickHouse host: $CLICKHOUSE_HOST"
         # Construct URL from host and port
         CH_PORT="${CLICKHOUSE_PORT:-6123}"
         CH_URL="http://${CLICKHOUSE_HOST}:${CH_PORT}"
-        sed -i "s|url = \".*\"|url = \"$CH_URL\"|g" /etc/AncientReport/config.toml
+        update_toml_value "clickhouse" "url" "$CH_URL" /etc/AncientReport/config.toml
     fi
     
     if [ -n "$CLICKHOUSE_DB" ]; then
-        sed -i "s|database = \".*\"|database = \"$CLICKHOUSE_DB\"|g" /etc/AncientReport/config.toml
+        update_toml_value "clickhouse" "database" "$CLICKHOUSE_DB" /etc/AncientReport/config.toml
     fi
     
     if [ -n "$CLICKHOUSE_USER" ]; then
-        sed -i "s|username = \".*\"|username = \"$CLICKHOUSE_USER\"|g" /etc/AncientReport/config.toml
+        update_toml_value "clickhouse" "username" "$CLICKHOUSE_USER" /etc/AncientReport/config.toml
     fi
     
     if [ -n "$CLICKHOUSE_PASSWORD" ]; then
-        sed -i "s|password = \".*\"|password = \"$CLICKHOUSE_PASSWORD\"|g" /etc/AncientReport/config.toml
+        update_toml_value "clickhouse" "password" "$CLICKHOUSE_PASSWORD" /etc/AncientReport/config.toml
     fi
     
+    # Agent configuration
     if [ -n "$AGENT_HOSTNAME" ]; then
         echo "Configuring Hostname: $AGENT_HOSTNAME"
-        sed -i "s|hostname = \".*\"|hostname = \"$AGENT_HOSTNAME\"|g" /etc/AncientReport/config.toml
+        update_toml_value "agent" "hostname" "$AGENT_HOSTNAME" /etc/AncientReport/config.toml
     fi
+    
+    # NATS configuration
+    if [ -n "$NATS_URL" ]; then
+        echo "Configuring NATS URL: $NATS_URL"
+        update_toml_value "nats" "url" "$NATS_URL" /etc/AncientReport/config.toml
+    fi
+    
+    if [ -n "$NATS_ENABLED" ]; then
+        echo "Configuring NATS enabled: $NATS_ENABLED"
+        # Update boolean value (no quotes)
+        awk -v enabled="$NATS_ENABLED" '
+        BEGIN { in_section=0 }
+        /^\[nats\]/ {
+            in_section=1
+            print
+            next
+        }
+        /^\[.*\]/ {
+            in_section=0
+            print
+            next
+        }
+        in_section && /^enabled *=/ {
+            print "enabled = " enabled
+            next
+        }
+        { print }
+        ' /etc/AncientReport/config.toml > /etc/AncientReport/config.toml.tmp && \
+        mv /etc/AncientReport/config.toml.tmp /etc/AncientReport/config.toml
+    fi
+    
+    # Display final configuration for debugging
+    echo "=== Final Configuration ==="
+    echo "ClickHouse URL: $(grep -A5 '^\[clickhouse\]' /etc/AncientReport/config.toml | grep '^url' || echo 'not set')"
+    echo "NATS URL: $(grep -A5 '^\[nats\]' /etc/AncientReport/config.toml | grep '^url' || echo 'not set')"
+    echo "NATS Enabled: $(grep -A5 '^\[nats\]' /etc/AncientReport/config.toml | grep '^enabled' || echo 'not set')"
+    echo "=========================="
 else
     echo "Error: Could not find any config file"
     exit 1
