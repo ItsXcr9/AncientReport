@@ -175,3 +175,4 @@ These can be customized in `analysis/src/alerts/alert_rules.py`.
 - **Logs**: `docker logs AncientReport-analysis`
 - **Database**: `docker exec -it AncientReport-clickhouse clickhouse-client`
 
+

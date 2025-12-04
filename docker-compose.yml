@@ -54,6 +54,12 @@ services:
       TZ: Asia/Tehran
       # V2 Mode: Enable NATS streaming (comment out to use V1 legacy mode)
       NATS_URL: nats://localhost:4222
+      # ClickHouse configuration
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: 6123
+      CLICKHOUSE_DB: AncientReport
+      CLICKHOUSE_USER: AncientReport
+      CLICKHOUSE_PASSWORD: AncientReport
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /proc:/host/proc:ro

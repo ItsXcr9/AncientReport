@@ -21,3 +21,4 @@ INSERT INTO AncientReport.settings (setting_key, setting_value, category, descri
 ('alert_cooldown_minutes', '30', 'alerts', 'Default alert cooldown period'),
 ('max_alerts_history', '100', 'alerts', 'Maximum alerts to keep in history');
 
+
