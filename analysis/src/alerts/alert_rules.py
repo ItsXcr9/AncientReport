@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from ..storage.clickhouse_client import get_clickhouse_client
 from ..api.realtime import broadcast_alert
 from .telegram_notifier import send_telegram_alert
+from utils.timezone import now
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class AlertRule:
         
         last_time = self.last_triggered[server]
         cooldown_end = last_time + timedelta(minutes=self.cooldown_minutes)
-        return datetime.utcnow() > cooldown_end
+        return now() > cooldown_end
     
     def evaluate(self, value: float) -> bool:
         """Evaluate if value meets the alert condition"""
@@ -56,7 +57,7 @@ class AlertRule:
     
     def trigger(self, server: str, value: float):
         """Mark alert as triggered for this server"""
-        self.last_triggered[server] = datetime.utcnow()
+        self.last_triggered[server] = now()
 
 
 # Define default alert rules

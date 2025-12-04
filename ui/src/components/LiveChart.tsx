@@ -135,12 +135,38 @@ export function LiveChart({
 
   const formatXAxis = (timestamp: string) => {
     try {
+      // Backend sends timestamps in Tehran timezone (ISO format with +03:30 offset)
+      // Extract time directly from the string to avoid browser timezone conversion
+      // Format: "2025-12-04T14:41:00+03:30" - we want "14:41"
+      const match = timestamp.match(/T(\d{2}):(\d{2})/);
+      if (match) {
+        return `${match[1]}:${match[2]}`;
+      }
+      // Fallback: parse and extract (still avoids locale conversion)
       const date = new Date(timestamp);
-      return date.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
+      if (!isNaN(date.getTime())) {
+        // Extract hours/minutes from the original Tehran time in the string
+        const parts = timestamp.split('T')[1]?.split(':');
+        if (parts && parts.length >= 2) {
+          return `${parts[0]}:${parts[1]}`;
+        }
+      }
+      return timestamp.substring(11, 16) || timestamp;
+    } catch (e) {
+      return timestamp;
+    }
+  };
+
+  const formatTooltipLabel = (timestamp: string) => {
+    try {
+      // Extract date and time from Tehran timestamp string
+      // Format: "2025-12-04T14:41:00+03:30"
+      const [datePart, timePart] = timestamp.split('T');
+      if (datePart && timePart) {
+        const time = timePart.substring(0, 8); // "14:41:00"
+        return `${datePart} ${time} (Tehran)`;
+      }
+      return timestamp;
     } catch (e) {
       return timestamp;
     }
@@ -253,7 +279,7 @@ export function LiveChart({
                 borderRadius: '8px'
               }}
               formatter={formatTooltip}
-              labelFormatter={(label) => new Date(label).toLocaleString()}
+              labelFormatter={formatTooltipLabel}
             />
             <Legend />
             

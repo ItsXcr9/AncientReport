@@ -140,27 +140,31 @@ export function MetricsChart({
 
   const formatXAxis = (timestamp: string) => {
     try {
-      // Manually parse the timestamp string to avoid browser timezone conversions
-      // Expected format: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
-      // We want to treat these numbers as LOCAL time, exactly as they appear
-      const parts = timestamp.split(/[-T :]/);
-      if (parts.length >= 5) {
-        const year = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1; // Months are 0-indexed
-        const day = parseInt(parts[2]);
-        const hour = parseInt(parts[3]);
-        const minute = parseInt(parts[4]);
-        
-        // Create date using local time constructor
-        const date = new Date(year, month, day, hour, minute);
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      // Backend sends timestamps in Tehran timezone (ISO format with +03:30 offset)
+      // Extract time directly from the string to avoid browser timezone conversion
+      // Format: "2025-12-04T14:41:00+03:30" - we want "14:41"
+      const match = timestamp.match(/T(\d{2}):(\d{2})/);
+      if (match) {
+        return `${match[1]}:${match[2]}`;
       }
-      
-      // Fallback to standard parsing if format doesn't match
-      const date = new Date(timestamp);
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      // Fallback: try to extract from the string directly
+      return timestamp.substring(11, 16) || timestamp;
     } catch (e) {
       console.warn(`[${title}] Error formatting timestamp:`, timestamp, e);
+      return timestamp;
+    }
+  };
+
+  const formatTooltipLabel = (timestamp: string) => {
+    try {
+      // Extract date and time from Tehran timestamp string
+      const [datePart, timePart] = timestamp.split('T');
+      if (datePart && timePart) {
+        const time = timePart.substring(0, 8);
+        return `${datePart} ${time} (Tehran)`;
+      }
+      return timestamp;
+    } catch (e) {
       return timestamp;
     }
   };
@@ -234,7 +238,7 @@ export function MetricsChart({
               borderRadius: '8px'
             }}
             formatter={formatTooltip}
-            labelFormatter={(label) => new Date(label).toLocaleString()}
+            labelFormatter={formatTooltipLabel}
           />
           <Legend />
           <Line 

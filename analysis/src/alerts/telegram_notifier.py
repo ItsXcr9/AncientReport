@@ -6,7 +6,8 @@ import asyncio
 import logging
 import aiohttp
 from typing import Optional
-from datetime import datetime
+
+from utils.timezone import now
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class TelegramNotifier:
         title = alert.get('title', 'System Alert')
         message = alert.get('message', 'No details provided')
         server = alert.get('hostname', alert.get('server', 'Unknown'))
-        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+        timestamp = now().strftime('%Y-%m-%d %H:%M:%S Tehran')
         
         # Build message
         text = f"{emoji} *{level} ALERT*\\n\\n"
@@ -167,7 +168,7 @@ class TelegramNotifier:
                 if key != 'healthy':
                     text += f"• {key}: `{value}`\\n"
             
-            text += f"\\n🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            text += f"\\n🕐 {now().strftime('%Y-%m-%d %H:%M:%S Tehran')}"
             
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             payload = {

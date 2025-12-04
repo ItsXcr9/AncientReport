@@ -6,7 +6,8 @@ import json
 import logging
 from typing import Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from datetime import datetime
+
+from utils.timezone import now
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ async def websocket_metrics_endpoint(websocket: WebSocket):
         # Send initial connection confirmation
         await websocket.send_json({
             "type": "connected",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": now().isoformat(),
             "message": "Connected to metrics stream"
         })
         
@@ -90,14 +91,14 @@ async def websocket_metrics_endpoint(websocket: WebSocket):
                 try:
                     request = json.loads(data)
                     if request.get("type") == "ping":
-                        await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+                        await websocket.send_json({"type": "pong", "timestamp": now().isoformat()})
                     elif request.get("type") == "subscribe":
                         # Handle subscription to specific metrics
                         hostname = request.get("hostname")
                         await websocket.send_json({
                             "type": "subscribed",
                             "hostname": hostname,
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": now().isoformat()
                         })
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON from client: {data}")
@@ -106,7 +107,7 @@ async def websocket_metrics_endpoint(websocket: WebSocket):
                 # Send heartbeat to keep connection alive
                 await websocket.send_json({
                     "type": "heartbeat",
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": now().isoformat()
                 })
                 
     except WebSocketDisconnect:
@@ -130,7 +131,7 @@ async def websocket_alerts_endpoint(websocket: WebSocket):
         # Send initial connection confirmation
         await websocket.send_json({
             "type": "connected",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": now().isoformat(),
             "message": "Connected to alerts stream"
         })
         
@@ -143,7 +144,7 @@ async def websocket_alerts_endpoint(websocket: WebSocket):
                 try:
                     request = json.loads(data)
                     if request.get("type") == "ping":
-                        await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+                        await websocket.send_json({"type": "pong", "timestamp": now().isoformat()})
                 except json.JSONDecodeError:
                     pass
                     
@@ -151,7 +152,7 @@ async def websocket_alerts_endpoint(websocket: WebSocket):
                 # Send heartbeat
                 await websocket.send_json({
                     "type": "heartbeat",
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": now().isoformat()
                 })
                 
     except WebSocketDisconnect:
@@ -171,7 +172,7 @@ async def broadcast_metric(metric: dict):
     await metrics_manager.broadcast({
         "type": "metric",
         "data": metric,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": now().isoformat()
     })
 
 
@@ -184,7 +185,7 @@ async def broadcast_alert(alert: dict):
     await alerts_manager.broadcast({
         "type": "alert",
         "data": alert,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": now().isoformat()
     })
 
 
