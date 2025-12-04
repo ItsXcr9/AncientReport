@@ -1,9 +1,9 @@
 [package]
 name = "AncientReport-agent"
-version = "1.0.0"
+version = "3.0.0"
 edition = "2021"
 authors = ["AncientReport Team"]
-description = "Low-overhead eBPF-based system monitoring agent"
+description = "V3 eBPF-based monitoring agent with custom monitors and security scanning"
 license = "Apache-2.0"
 
 [dependencies]
@@ -50,6 +50,9 @@ libc = "0.2"
 # Streaming
 async-nats = "0.33"
 rmp-serde = "1.1"
+
+# V3: Async utilities
+futures = "0.3"
 
 [build-dependencies]
 libbpf-cargo = "0.23"

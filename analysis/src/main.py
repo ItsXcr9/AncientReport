@@ -15,6 +15,8 @@ from ai.engine import AIEngine
 from ingestion_gateway import IngestionGateway
 from api import containers
 from api import healthchecks
+from api import custom_monitors  # V3
+from api import security as security_api  # V3
 from utils.timezone import now, from_iso, format_for_display, format_for_chart, TEHRAN_TZ
 
 # Configure logging
@@ -26,9 +28,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="AncientReport AI Analysis Engine",
-    description="AI-powered infrastructure analysis and reporting",
-    version="1.0.0"
+    title="AncientReport AI Analysis Engine V3",
+    description="AI-powered infrastructure analysis and reporting with custom monitoring and security scanning",
+    version="3.0.0"
 )
 
 # Configure CORS
@@ -40,9 +42,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
+# Register V1/V2 routers
 app.include_router(containers.router, prefix="/api/containers", tags=["containers"])
 app.include_router(healthchecks.router, prefix="/api", tags=["healthchecks"])
+
+# Register V3 routers
+from api import alerts as alerts_api
+app.include_router(custom_monitors.router, tags=["V3 Custom Monitors"])
+app.include_router(security_api.router, tags=["V3 Security"])
+app.include_router(alerts_api.router, tags=["V3 Alerts"])
 
 # Import and register realtime WebSocket router
 from api import realtime

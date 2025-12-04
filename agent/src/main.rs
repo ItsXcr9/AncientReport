@@ -8,11 +8,15 @@ mod collectors;
 mod aggregator;
 mod storage;
 mod streaming;
+mod custom_monitors;
+mod security;
 
 use config::Config;
 use aggregator::MetricAggregator;
 use collectors::{ProcCollector, DockerCollector, EbpfCollector};
 use streaming::StreamingPublisher;
+use custom_monitors::CustomMonitorManager;
+use security::PortScanner;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -88,7 +92,7 @@ async fn main() -> Result<()> {
     }
     
     let clickhouse_url = url.to_string();
-    let docker_collector = DockerCollector::new(clickhouse_url, config.agent.hostname.clone());
+    let docker_collector = DockerCollector::new(clickhouse_url.clone(), config.agent.hostname.clone());
     let docker_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
         loop {
@@ -99,6 +103,48 @@ async fn main() -> Result<()> {
         }
     });
     info!("✓ Docker collector started");
+
+    // V3: Start Custom Monitor Manager
+    info!("Starting V3 Custom Monitor Manager...");
+    let custom_monitor_manager = CustomMonitorManager::new(
+        config.agent.hostname.clone(),
+        metrics_tx.clone(),
+        clickhouse_url.clone(),
+        Some("http://localhost:8800".to_string()), // API URL for config
+    );
+    let custom_monitor_handle = tokio::spawn(async move {
+        if let Err(e) = custom_monitor_manager.start().await {
+            error!("Custom monitor manager error: {}", e);
+        }
+    });
+    info!("✓ Custom Monitor Manager started");
+
+    // V3: Start Security Scanner (runs hourly)
+    info!("Starting V3 Security Scanner...");
+    let security_hostname = config.agent.hostname.clone();
+    let security_clickhouse_url = clickhouse_url.clone();
+    let security_handle = tokio::spawn(async move {
+        let scanner = PortScanner::new(security_hostname.clone());
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600)); // Hourly
+        
+        // Initial scan after 60 seconds
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        
+        loop {
+            info!("🔍 Running security port scan...");
+            let result = scanner.scan_localhost().await;
+            info!("✓ Security scan complete: {} open ports, risk score: {}", 
+                  result.open_ports.len(), result.risk_score);
+            
+            // Store results in ClickHouse
+            if let Err(e) = store_security_scan(&security_clickhouse_url, &result).await {
+                error!("Failed to store security scan: {}", e);
+            }
+            
+            interval.tick().await;
+        }
+    });
+    info!("✓ Security Scanner started");
 
     // Start aggregator or streaming publisher based on mode
     let backend_handle = if use_streaming {
@@ -145,25 +191,76 @@ async fn main() -> Result<()> {
         }))
     };
 
-    info!("🎉 AncientReport AI Agent is running!");
+    info!("🎉 AncientReport V3 Agent is running!");
     info!("   Monitoring system with <3% overhead");
+    info!("   V3 Features: Custom Monitors, Security Scanning");
     info!("   Press Ctrl+C to stop");
 
     // Wait for Ctrl+C
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
 
-    // Wait for all tasks to complete
+    // Wait for all tasks to complete (including V3 tasks)
     if let Some(backend) = backend_handle {
         if let Some(ebpf) = ebpf_handle {
-            let _ = tokio::join!(proc_handle, backend, docker_handle, ebpf);
+            let _ = tokio::join!(
+                proc_handle, 
+                backend, 
+                docker_handle, 
+                ebpf,
+                custom_monitor_handle,
+                security_handle
+            );
         } else {
-            let _ = tokio::join!(proc_handle, backend, docker_handle);
+            let _ = tokio::join!(
+                proc_handle, 
+                backend, 
+                docker_handle,
+                custom_monitor_handle,
+                security_handle
+            );
         }
     } else {
-        let _ = tokio::join!(proc_handle, docker_handle);
+        let _ = tokio::join!(
+            proc_handle, 
+            docker_handle,
+            custom_monitor_handle,
+            security_handle
+        );
     }
 
-    info!("👋 AncientReport AI Agent stopped");
+    info!("👋 AncientReport V3 Agent stopped");
+    Ok(())
+}
+
+/// Store security scan results in ClickHouse
+async fn store_security_scan(
+    clickhouse_url: &str, 
+    result: &security::ScanResult
+) -> Result<()> {
+    let client = reqwest::Client::new();
+    
+    let open_ports: Vec<u16> = result.open_ports.iter().map(|p| p.port).collect();
+    let risky_ports: Vec<u16> = result.risky_ports.iter().map(|p| p.port).collect();
+    let results_json = serde_json::to_string(&result.open_ports)?;
+    
+    let query = format!(
+        r#"INSERT INTO security_scans 
+           (timestamp, hostname, scan_type, target, results, risk_score, open_ports, risky_ports) 
+           VALUES (now(), '{}', 'port', '{}', '{}', {}, {:?}, {:?})"#,
+        result.hostname,
+        result.target,
+        results_json.replace('\'', "''"),
+        result.risk_score,
+        open_ports,
+        risky_ports,
+    );
+
+    client
+        .post(clickhouse_url)
+        .body(query)
+        .send()
+        .await?;
+
     Ok(())
 }

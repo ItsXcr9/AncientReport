@@ -1,0 +1,260 @@
+.security-dashboard {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.security-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.security-header h2 {
+  color: #e2e8f0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.scan-btn {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.scan-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+.security-loading {
+  text-align: center;
+  padding: 48px;
+  color: #94a3b8;
+}
+
+/* Summary */
+.security-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.score-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-circle {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.score-inner {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.score-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.stat-icon {
+  font-size: 1.5rem;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.stat-card.risky {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.stat-card.threats {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Sections */
+.security-section {
+  margin-bottom: 24px;
+}
+
+.security-section h3 {
+  color: #e2e8f0;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+}
+
+.no-data {
+  text-align: center;
+  padding: 24px;
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+/* Ports Grid */
+.ports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.port-card {
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  position: relative;
+}
+
+.port-card.risky {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.port-number {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.port-service {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.port-protocol {
+  font-size: 0.625rem;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.port-warning {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 0.875rem;
+}
+
+/* Events List */
+.events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.event-item.resolved {
+  opacity: 0.6;
+}
+
+.event-severity {
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+}
+
+.event-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.event-type {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-transform: capitalize;
+}
+
+.event-desc {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.event-time {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .security-summary {
+    grid-template-columns: 1fr;
+  }
+  
+  .stat-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
