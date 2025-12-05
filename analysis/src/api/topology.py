@@ -188,22 +188,25 @@ def build_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
     api_services = []
     ui_services = []
     agents = []
+    others = []
     
     for node in nodes:
         name_lower = node.name.lower()
         if node.status != "running":
             continue
             
-        if any(db in name_lower for db in ["clickhouse", "postgres", "mysql", "mongo", "redis", "mariadb"]):
+        if any(db in name_lower for db in ["clickhouse", "postgres", "mysql", "mongo", "redis", "mariadb", "elasticsearch"]):
             db_services.append(node)
         elif any(mq in name_lower for mq in ["nats", "kafka", "rabbit", "redis"]):
             mq_services.append(node)
-        elif any(api in name_lower for api in ["analysis", "api", "backend", "server", "app"]):
+        elif any(api in name_lower for api in ["analysis", "api", "backend", "server", "app", "service"]):
             api_services.append(node)
-        elif any(ui in name_lower for ui in ["ui", "frontend", "nginx", "web", "caddy"]):
+        elif any(ui in name_lower for ui in ["ui", "frontend", "nginx", "web", "caddy", "proxy"]):
             ui_services.append(node)
         elif "agent" in name_lower:
             agents.append(node)
+        else:
+            others.append(node)
     
     edge_id = 0
     
@@ -220,21 +223,18 @@ def build_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
         if network in ["host", "none", "bridge"]:
             continue
             
-        group_db = [n for n in group_nodes if n in db_services or n in mq_services]
-        group_api = [n for n in group_nodes if n in api_services]
-        group_ui = [n for n in group_nodes if n in ui_services]
-        group_agents = [n for n in group_nodes if n in agents]
-        
-        # UI -> API
-        for ui in group_ui:
-            for api in group_api:
+        # 1. Connect UI/Proxy -> API/App
+        for ui in [n for n in group_nodes if n in ui_services]:
+            targets = [n for n in group_nodes if n in api_services or n in others]
+            for target in targets:
+                if ui.id == target.id: continue
                 edge_id += 1
                 connections.append(ConnectionEdge(
                     id=f"edge-{edge_id}",
                     source=ui.name,
-                    target=api.name,
+                    target=target.name,
                     source_port=80,
-                    target_port=8800,
+                    target_port=8080,
                     protocol="tcp",
                     bytes_sent=random.randint(50000, 500000),
                     bytes_received=random.randint(200000, 2000000),
@@ -243,15 +243,17 @@ def build_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
                     requests_per_sec=round(random.uniform(10, 100), 1),
                 ))
         
-        # API -> DB/MQ
-        for api in group_api:
-            for db in group_db:
+        # 2. Connect API/App -> DB/MQ
+        for api in [n for n in group_nodes if n in api_services or n in others]:
+            targets = [n for n in group_nodes if n in db_services or n in mq_services]
+            for target in targets:
+                if api.id == target.id: continue
                 edge_id += 1
                 connections.append(ConnectionEdge(
                     id=f"edge-{edge_id}",
                     source=api.name,
-                    target=db.name,
-                    source_port=8800,
+                    target=target.name,
+                    source_port=0,
                     target_port=5432,
                     protocol="tcp",
                     bytes_sent=random.randint(20000, 200000),
@@ -261,14 +263,16 @@ def build_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
                     requests_per_sec=round(random.uniform(50, 500), 1),
                 ))
         
-        # Agent -> DB/MQ
-        for agent in group_agents:
-            for db in group_db:
+        # 3. Connect Agents -> DB/MQ/API
+        for agent in [n for n in group_nodes if n in agents]:
+            targets = [n for n in group_nodes if n in db_services or n in mq_services or n in api_services]
+            for target in targets:
+                if agent.id == target.id: continue
                 edge_id += 1
                 connections.append(ConnectionEdge(
                     id=f"edge-{edge_id}",
                     source=agent.name,
-                    target=db.name,
+                    target=target.name,
                     source_port=0,
                     target_port=4222,
                     protocol="tcp",
@@ -278,7 +282,36 @@ def build_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
                     status="active",
                     requests_per_sec=round(random.uniform(20, 200), 1),
                 ))
-    
+        
+        # 4. Fallback: If a container has no connections yet, connect it to something in the same network
+        # This ensures we don't have isolated nodes if they are in a shared network
+        for node in group_nodes:
+            has_connection = False
+            for conn in connections:
+                if conn.source == node.name or conn.target == node.name:
+                    has_connection = True
+                    break
+            
+            if not has_connection and len(group_nodes) > 1:
+                # Find a random partner in the same network
+                partners = [n for n in group_nodes if n.id != node.id]
+                if partners:
+                    partner = random.choice(partners)
+                    edge_id += 1
+                    connections.append(ConnectionEdge(
+                        id=f"edge-{edge_id}",
+                        source=node.name,
+                        target=partner.name,
+                        source_port=0,
+                        target_port=0,
+                        protocol="tcp",
+                        bytes_sent=random.randint(1000, 10000),
+                        bytes_received=random.randint(1000, 10000),
+                        latency_ms=round(random.uniform(1.0, 10.0), 1),
+                        status="active",
+                        requests_per_sec=round(random.uniform(1, 10), 1),
+                    ))
+
     return connections
 
 

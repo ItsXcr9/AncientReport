@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Box, Server, Database, Radio, AlertTriangle, RefreshCw, 
-  ArrowRight, X, Zap, Activity, Network, ChevronRight, Layers
+  ArrowRight, X, Zap, Activity, Network, ChevronRight, Layers,
+  ZoomIn, ZoomOut, Eye, EyeOff, Maximize2
 } from 'lucide-react';
 
 interface ContainerNode {
@@ -38,6 +39,7 @@ interface TopologyProblem {
   source_container: string;
   target: string;
   message: string;
+  detected_at: string;
 }
 
 interface TopologyData {
@@ -47,10 +49,11 @@ interface TopologyData {
   last_updated: string;
 }
 
-interface NetworkGroup {
-  name: string;
-  containers: ContainerNode[];
-  color: string;
+interface SimulationNode extends ContainerNode {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
 }
 
 const API_BASE = '';
@@ -64,7 +67,7 @@ const NETWORK_COLORS = [
   { bg: 'rgba(248, 113, 113, 0.1)', border: '#f87171', text: 'text-red-400' },
 ];
 
-// Icon mapping for container types
+// Icon mapping
 const getContainerIcon = (name: string) => {
   const lowerName = name.toLowerCase();
   if (lowerName.includes('nginx') || lowerName.includes('ui') || lowerName.includes('frontend')) return Box;
@@ -91,6 +94,70 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// Hierarchical layout - arranges nodes in rows by type
+const calculateHierarchicalLayout = (nodes: ContainerNode[], width: number, height: number): SimulationNode[] => {
+  // Categorize containers
+  const categories: Record<string, ContainerNode[]> = {
+    ui: [],
+    api: [],
+    db: [],
+    mq: [],
+    agent: [],
+    other: []
+  };
+
+  nodes.forEach(node => {
+    const name = node.name.toLowerCase();
+    if (name.includes('ui') || name.includes('nginx') || name.includes('frontend') || name.includes('web') || name.includes('caddy')) {
+      categories.ui.push(node);
+    } else if (name.includes('analysis') || name.includes('api') || name.includes('backend') || name.includes('server') || name.includes('app')) {
+      categories.api.push(node);
+    } else if (name.includes('clickhouse') || name.includes('postgres') || name.includes('mysql') || name.includes('mongo') || name.includes('redis') || name.includes('elasticsearch')) {
+      categories.db.push(node);
+    } else if (name.includes('nats') || name.includes('kafka') || name.includes('rabbit') || name.includes('mq')) {
+      categories.mq.push(node);
+    } else if (name.includes('agent')) {
+      categories.agent.push(node);
+    } else {
+      categories.other.push(node);
+    }
+  });
+
+  // Define row positions (top to bottom: UI -> API -> DB/MQ -> Agent -> Other)
+  const rows = [
+    { key: 'ui', y: 80, label: 'UI/Frontend' },
+    { key: 'api', y: 200, label: 'API/Backend' },
+    { key: 'db', y: 320, label: 'Database' },
+    { key: 'mq', y: 440, label: 'Message Queue' },
+    { key: 'agent', y: 560, label: 'Agents' },
+    { key: 'other', y: 680, label: 'Other' },
+  ];
+
+  const result: SimulationNode[] = [];
+  const minSpacing = 120; // Minimum horizontal spacing between nodes
+
+  rows.forEach(row => {
+    const rowNodes = categories[row.key];
+    if (rowNodes.length === 0) return;
+
+    // Calculate horizontal positions
+    const totalWidth = (rowNodes.length - 1) * minSpacing;
+    const startX = (width - totalWidth) / 2;
+
+    rowNodes.forEach((node, idx) => {
+      result.push({
+        ...node,
+        x: startX + idx * minSpacing,
+        y: row.y,
+        vx: 0,
+        vy: 0
+      });
+    });
+  });
+
+  return result;
+};
+
 export const ContainerTopology = () => {
   const [topology, setTopology] = useState<TopologyData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,6 +165,21 @@ export const ContainerTopology = () => {
   const [selectedNodeDetails, setSelectedNodeDetails] = useState<any>(null);
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'graph' | 'groups'>('graph');
+  const [showLabels, setShowLabels] = useState(true);
+  
+  // View state
+  const [zoom, setZoom] = useState(0.85);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const svgRef = useRef<SVGSVGElement>(null);
+  
+  // Layout state
+  const [simNodes, setSimNodes] = useState<SimulationNode[]>([]);
+  
+  // Canvas dimensions - much larger for 37+ containers
+  const canvasWidth = 1600;
+  const canvasHeight = 800;
 
   const fetchTopology = useCallback(async () => {
     try {
@@ -139,7 +221,44 @@ export const ContainerTopology = () => {
     }
   }, [selectedNode, fetchNodeDetails]);
 
-  // Group containers by network
+  // Calculate layout when topology changes
+  useEffect(() => {
+    if (!topology?.nodes) return;
+    const layoutNodes = calculateHierarchicalLayout(topology.nodes, canvasWidth, canvasHeight);
+    setSimNodes(layoutNodes);
+  }, [topology]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.target === svgRef.current || (e.target as Element).tagName === 'svg') {
+      setIsDragging(true);
+      dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPan({
+      x: e.clientX - dragStartRef.current.x,
+      y: e.clientY - dragStartRef.current.y
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const scale = e.deltaY > 0 ? 0.95 : 1.05;
+    setZoom(prev => Math.min(Math.max(0.3, prev * scale), 2));
+  };
+
+  const resetView = () => {
+    setZoom(0.85);
+    setPan({ x: 0, y: 0 });
+  };
+
+  // Group containers by network for Groups view
   const networkGroups = useMemo(() => {
     if (!topology?.nodes) return [];
     
@@ -164,68 +283,36 @@ export const ContainerTopology = () => {
     }));
   }, [topology?.nodes]);
 
-  // Calculate node positions - group by network
-  const nodePositions = useMemo(() => {
-    if (!topology?.nodes) return {};
-    const positions: Record<string, { x: number; y: number; network: string }> = {};
-    const centerX = 350;
-    const centerY = 200;
+  const getEdgePath = (sourceId: string, targetId: string) => {
+    const source = simNodes.find(n => n.id === sourceId || n.name === sourceId);
+    const target = simNodes.find(n => n.id === targetId || n.name === targetId);
+    if (!source || !target) return null;
     
-    if (networkGroups.length === 1) {
-      // Single network: circular layout
-      const radius = 150;
-      topology.nodes.forEach((node, index) => {
-        const angle = (2 * Math.PI * index) / topology.nodes.length - Math.PI / 2;
-        positions[node.id] = {
-          x: centerX + radius * Math.cos(angle),
-          y: centerY + radius * Math.sin(angle),
-          network: node.networks?.[0] || 'default'
-        };
-      });
-    } else {
-      // Multiple networks: group layout
-      const groupRadius = 100;
-      const groupSpacing = 200;
-      
-      networkGroups.forEach((group, groupIndex) => {
-        const groupAngle = (2 * Math.PI * groupIndex) / networkGroups.length - Math.PI / 2;
-        const groupCenterX = centerX + (networkGroups.length > 2 ? groupRadius * 1.5 : 0) * Math.cos(groupAngle);
-        const groupCenterY = centerY + (networkGroups.length > 2 ? groupRadius * 1.5 : 0) * Math.sin(groupAngle);
-        
-        group.containers.forEach((node, nodeIndex) => {
-          if (!positions[node.id]) {
-            const nodeAngle = (2 * Math.PI * nodeIndex) / group.containers.length - Math.PI / 2;
-            const nodeRadius = Math.min(60, 80 - group.containers.length * 5);
-            positions[node.id] = {
-              x: groupCenterX + nodeRadius * Math.cos(nodeAngle),
-              y: groupCenterY + nodeRadius * Math.sin(nodeAngle),
-              network: group.name
-            };
-          }
-        });
-      });
-    }
-    
-    return positions;
-  }, [topology?.nodes, networkGroups]);
-
-  // Get edge path with curve
-  const getEdgePath = useCallback((sourceId: string, targetId: string) => {
-    const source = nodePositions[sourceId];
-    const target = nodePositions[targetId];
-    if (!source || !target) return '';
-    
-    const midX = (source.x + target.x) / 2;
-    const midY = (source.y + target.y) / 2;
+    // Calculate curved path
     const dx = target.x - source.x;
     const dy = target.y - source.y;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const curvature = 20;
-    const nx = -dy / len * curvature;
-    const ny = dx / len * curvature;
+    const dist = Math.sqrt(dx * dx + dy * dy);
     
-    return `M ${source.x} ${source.y} Q ${midX + nx} ${midY + ny} ${target.x} ${target.y}`;
-  }, [nodePositions]);
+    // Control point offset for curve
+    const cpOffset = Math.min(50, dist * 0.2);
+    const midX = (source.x + target.x) / 2;
+    const midY = (source.y + target.y) / 2;
+    
+    // Perpendicular offset
+    const nx = -dy / (dist || 1);
+    const ny = dx / (dist || 1);
+    const cpX = midX + nx * cpOffset;
+    const cpY = midY + ny * cpOffset;
+
+    // Label position on curve
+    const labelX = 0.25 * source.x + 0.5 * cpX + 0.25 * target.x;
+    const labelY = 0.25 * source.y + 0.5 * cpY + 0.25 * target.y;
+
+    return {
+      path: `M ${source.x} ${source.y} Q ${cpX} ${cpY} ${target.x} ${target.y}`,
+      label: { x: labelX, y: labelY }
+    };
+  };
 
   if (loading) {
     return (
@@ -259,7 +346,7 @@ export const ContainerTopology = () => {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="glass-card p-6 rounded-xl"
+      className="glass-card p-6 rounded-xl overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
@@ -270,11 +357,11 @@ export const ContainerTopology = () => {
           <div>
             <h3 className="text-lg font-semibold text-white">Container Topology</h3>
             <p className="text-xs text-gray-500">
-              {topology.nodes.length} containers • {topology.edges.length} connections • {networkGroups.length} network{networkGroups.length > 1 ? 's' : ''}
+              {topology.nodes.length} containers • {topology.edges.length} connections
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {/* View Toggle */}
           <div className="flex items-center bg-white/5 rounded-lg p-1">
             <button
@@ -295,18 +382,43 @@ export const ContainerTopology = () => {
               Groups
             </button>
           </div>
+
+          {/* Graph Controls */}
+          {viewMode === 'graph' && (
+            <div className="flex items-center bg-white/5 rounded-lg p-1 gap-1">
+              <button 
+                onClick={() => setShowLabels(!showLabels)} 
+                className={`p-1.5 rounded hover:bg-white/10 ${showLabels ? 'text-neon-blue' : 'text-gray-400'}`}
+                title="Toggle Labels"
+              >
+                {showLabels ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              </button>
+              <div className="w-px h-4 bg-white/10" />
+              <button onClick={() => setZoom(z => Math.max(0.3, z - 0.1))} className="p-1.5 hover:bg-white/10 rounded" title="Zoom Out">
+                <ZoomOut className="w-4 h-4 text-gray-400" />
+              </button>
+              <span className="text-xs text-gray-400 w-10 text-center">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="p-1.5 hover:bg-white/10 rounded" title="Zoom In">
+                <ZoomIn className="w-4 h-4 text-gray-400" />
+              </button>
+              <div className="w-px h-4 bg-white/10" />
+              <button onClick={resetView} className="p-1.5 hover:bg-white/10 rounded" title="Reset View">
+                <Maximize2 className="w-4 h-4 text-gray-400" />
+              </button>
+            </div>
+          )}
           
           {problemCount > 0 && (
-            <div className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1 ${
+            <div className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1 ${
               criticalCount > 0 ? 'bg-red-400/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'
             }`}>
               <AlertTriangle className="w-3 h-3" />
-              {problemCount} issue{problemCount > 1 ? 's' : ''}
+              {problemCount}
             </div>
           )}
           <button
             onClick={fetchTopology}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-white/5 rounded-lg transition-colors"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4 text-gray-400" />
@@ -316,158 +428,175 @@ export const ContainerTopology = () => {
 
       {viewMode === 'graph' ? (
         /* Graph View */
-        <div className="relative bg-white/5 rounded-lg border border-white/10 overflow-hidden" style={{ height: '400px' }}>
-          <svg width="100%" height="100%" viewBox="0 0 700 400" className="overflow-visible">
-            {/* Network Group Backgrounds */}
-            {networkGroups.length > 1 && networkGroups.map((group, idx) => {
-              const groupNodes = group.containers.map(c => nodePositions[c.id]).filter(Boolean);
-              if (groupNodes.length === 0) return null;
-              
-              const minX = Math.min(...groupNodes.map(n => n.x)) - 50;
-              const maxX = Math.max(...groupNodes.map(n => n.x)) + 50;
-              const minY = Math.min(...groupNodes.map(n => n.y)) - 50;
-              const maxY = Math.max(...groupNodes.map(n => n.y)) + 50;
-              
-              return (
-                <g key={group.name}>
-                  <rect
-                    x={minX}
-                    y={minY}
-                    width={maxX - minX}
-                    height={maxY - minY}
-                    rx="12"
-                    fill={group.color.bg}
-                    stroke={group.color.border}
-                    strokeWidth="1"
-                    strokeDasharray="4,4"
-                    opacity="0.5"
-                  />
-                  <text
-                    x={minX + 8}
-                    y={minY + 16}
-                    className="fill-gray-400 text-xs"
-                  >
-                    {group.name}
-                  </text>
-                </g>
-              );
-            })}
+        <div 
+          className="relative bg-black/40 rounded-lg border border-white/10 overflow-hidden select-none" 
+          style={{ height: '700px' }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onWheel={handleWheel}
+        >
+          <svg 
+            ref={svgRef}
+            width="100%" 
+            height="100%" 
+            viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+            className="cursor-grab active:cursor-grabbing"
+            style={{ background: 'radial-gradient(circle at center, rgba(0,243,255,0.03) 0%, transparent 70%)' }}
+          >
+            <defs>
+              {/* Arrow marker for connections */}
+              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280" />
+              </marker>
+            </defs>
             
-            {/* Connection Edges */}
-            <g className="edges">
-              {topology.edges.map((edge) => {
-                const isHovered = hoveredEdge === edge.id;
-                const hasProblem = topology.problems.some(p => 
-                  p.source_container === edge.source && p.target === edge.target
-                );
-                const strokeColor = hasProblem ? '#f87171' : 
-                  edge.status === 'active' ? '#00f3ff' : '#6b7280';
-                const strokeWidth = isHovered ? 3 : Math.min(2, 1 + edge.requests_per_sec / 100);
-                
-                return (
-                  <g key={edge.id}>
-                    <path
-                      d={getEdgePath(edge.source, edge.target)}
-                      fill="none"
-                      stroke={strokeColor}
-                      strokeWidth={strokeWidth}
-                      strokeOpacity={isHovered ? 1 : 0.5}
-                      strokeDasharray={edge.status !== 'active' ? '5,5' : undefined}
-                      className="transition-all duration-300 cursor-pointer"
-                      onMouseEnter={() => setHoveredEdge(edge.id)}
-                      onMouseLeave={() => setHoveredEdge(null)}
-                    />
-                    {/* Animated flow indicator */}
-                    {edge.status === 'active' && (
-                      <circle r="3" fill={strokeColor}>
-                        <animateMotion
-                          dur="2s"
-                          repeatCount="indefinite"
-                          path={getEdgePath(edge.source, edge.target)}
-                        />
-                      </circle>
-                    )}
-                  </g>
-                );
-              })}
-            </g>
+            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+              {/* Row Labels */}
+              <g className="row-labels" opacity="0.4">
+                <text x="30" y="80" className="fill-gray-500 text-xs font-medium">UI / Frontend</text>
+                <text x="30" y="200" className="fill-gray-500 text-xs font-medium">API / Backend</text>
+                <text x="30" y="320" className="fill-gray-500 text-xs font-medium">Database</text>
+                <text x="30" y="440" className="fill-gray-500 text-xs font-medium">Message Queue</text>
+                <text x="30" y="560" className="fill-gray-500 text-xs font-medium">Agents</text>
+                <text x="30" y="680" className="fill-gray-500 text-xs font-medium">Other</text>
+              </g>
 
-            {/* Container Nodes */}
-            <g className="nodes">
-              {topology.nodes.map((node) => {
-                const pos = nodePositions[node.id];
-                if (!pos) return null;
-                
-                const colors = getHealthColor(node.health);
-                const isSelected = selectedNode === node.id;
-                const Icon = getContainerIcon(node.name);
-                const hasProblem = topology.problems.some(p => p.source_container === node.id);
-                
-                return (
-                  <g
-                    key={node.id}
-                    transform={`translate(${pos.x}, ${pos.y})`}
-                    onClick={() => setSelectedNode(isSelected ? null : node.id)}
-                    className="cursor-pointer"
-                  >
-                    {/* Problem indicator ring */}
-                    {hasProblem && (
-                      <circle
-                        r="42"
+              {/* Connection Edges */}
+              <g className="edges">
+                {topology.edges.map((edge) => {
+                  const isHovered = hoveredEdge === edge.id;
+                  const hasProblem = topology.problems.some(p => 
+                    p.source_container === edge.source && p.target === edge.target
+                  );
+                  
+                  // Color based on latency
+                  let strokeColor = '#4b5563';
+                  if (hasProblem) strokeColor = '#f87171';
+                  else if (edge.latency_ms < 1.0) strokeColor = '#4ade80';
+                  else if (edge.latency_ms < 5.0) strokeColor = '#fbbf24';
+                  else strokeColor = '#f472b6';
+
+                  const strokeWidth = isHovered ? 3 : 1.5;
+                  const opacity = isHovered ? 1 : 0.5;
+                  
+                  const pathData = getEdgePath(edge.source, edge.target);
+                  if (!pathData) return null;
+
+                  return (
+                    <g key={edge.id}>
+                      {/* Connection line */}
+                      <path
+                        d={pathData.path}
                         fill="none"
-                        stroke="#f87171"
-                        strokeWidth="2"
-                        strokeDasharray="4,4"
-                        className="animate-pulse"
+                        stroke={strokeColor}
+                        strokeWidth={strokeWidth}
+                        strokeOpacity={opacity}
+                        strokeDasharray={edge.status !== 'active' ? '4,4' : undefined}
+                        markerEnd="url(#arrowhead)"
+                        className="transition-all duration-200 cursor-pointer"
+                        onMouseEnter={() => setHoveredEdge(edge.id)}
+                        onMouseLeave={() => setHoveredEdge(null)}
                       />
-                    )}
-                    
-                    {/* Selection ring */}
-                    {isSelected && (
-                      <circle
-                        r="40"
-                        fill="none"
-                        stroke="#00f3ff"
-                        strokeWidth="2"
-                      />
-                    )}
-                    
-                    {/* Node circle */}
-                    <circle
-                      r="32"
-                      fill={colors.fill}
-                      fillOpacity="0.2"
-                      stroke={colors.fill}
-                      strokeWidth="2"
-                      className="transition-all duration-300"
-                    />
-                    
-                    {/* Icon */}
-                    <foreignObject x="-12" y="-12" width="24" height="24">
-                      <div className={`w-6 h-6 ${colors.text}`}>
-                        <Icon className="w-6 h-6" />
-                      </div>
-                    </foreignObject>
-                    
-                    {/* Label */}
-                    <text
-                      y="50"
-                      textAnchor="middle"
-                      className="fill-white text-xs font-medium"
+                      
+                      {/* Latency label */}
+                      {showLabels && (
+                        <g transform={`translate(${pathData.label.x}, ${pathData.label.y})`}>
+                          <rect 
+                            x="-20" y="-8" width="40" height="16" rx="3" 
+                            fill="rgba(0,0,0,0.8)"
+                            stroke={strokeColor}
+                            strokeWidth="0.5"
+                          />
+                          <text 
+                            textAnchor="middle" 
+                            dy="4" 
+                            className="fill-white text-[9px] font-mono pointer-events-none"
+                          >
+                            {edge.latency_ms.toFixed(1)}ms
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  );
+                })}
+              </g>
+
+              {/* Container Nodes */}
+              <g className="nodes">
+                {simNodes.map((node) => {
+                  const colors = getHealthColor(node.health);
+                  const isSelected = selectedNode === node.id;
+                  const Icon = getContainerIcon(node.name);
+                  const hasProblem = topology.problems.some(p => p.source_container === node.id);
+                  
+                  const nodeRadius = 20;
+                  
+                  return (
+                    <g
+                      key={node.id}
+                      transform={`translate(${node.x}, ${node.y})`}
+                      onClick={(e) => { e.stopPropagation(); setSelectedNode(isSelected ? null : node.id); }}
+                      className="cursor-pointer"
                     >
-                      {node.name.replace(/ancientreport-/i, '').replace(/^\//, '')}
-                    </text>
-                    
-                    {/* Status indicator */}
-                    <circle
-                      cx="22"
-                      cy="-22"
-                      r="6"
-                      fill={colors.fill}
-                    />
-                  </g>
-                );
-              })}
+                      {/* Problem indicator */}
+                      {hasProblem && (
+                        <circle
+                          r={nodeRadius + 6}
+                          fill="none"
+                          stroke="#f87171"
+                          strokeWidth="2"
+                          strokeDasharray="3,3"
+                          className="animate-pulse"
+                        />
+                      )}
+                      
+                      {/* Selection ring */}
+                      {isSelected && (
+                        <circle
+                          r={nodeRadius + 4}
+                          fill="none"
+                          stroke="#00f3ff"
+                          strokeWidth="2"
+                        />
+                      )}
+                      
+                      {/* Node circle */}
+                      <circle
+                        r={nodeRadius}
+                        fill="#0f172a"
+                        stroke={colors.fill}
+                        strokeWidth={2}
+                      />
+                      
+                      {/* Icon */}
+                      <foreignObject x={-10} y={-10} width={20} height={20}>
+                        <div className={`w-full h-full flex items-center justify-center ${colors.text}`}>
+                          <Icon className="w-4 h-4" />
+                        </div>
+                      </foreignObject>
+                      
+                      {/* Label */}
+                      {showLabels && (
+                        <g>
+                          <rect 
+                            x="-50" y={nodeRadius + 4} width="100" height="16" rx="3" 
+                            fill="rgba(0,0,0,0.7)"
+                          />
+                          <text
+                            y={nodeRadius + 15}
+                            textAnchor="middle"
+                            className="fill-white text-[10px] font-medium pointer-events-none"
+                          >
+                            {node.name.replace(/ancientreport-/i, '').replace(/^\//, '').substring(0, 15)}
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  );
+                })}
+              </g>
             </g>
           </svg>
 
@@ -478,26 +607,26 @@ export const ContainerTopology = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-gray-900/95 border border-white/20 rounded-lg p-3 text-xs shadow-xl"
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-gray-900/95 border border-white/20 rounded-lg p-3 text-xs shadow-xl z-50"
               >
                 {(() => {
                   const edge = topology.edges.find(e => e.id === hoveredEdge);
                   if (!edge) return null;
                   return (
-                    <div className="space-y-1">
+                    <div className="space-y-2">
                       <div className="flex items-center gap-2 text-white font-medium">
-                        <span>{edge.source}</span>
-                        <ArrowRight className="w-3 h-3 text-neon-blue" />
-                        <span>{edge.target}</span>
+                        <span className="truncate max-w-[100px]">{edge.source}</span>
+                        <ArrowRight className="w-3 h-3 text-neon-blue flex-shrink-0" />
+                        <span className="truncate max-w-[100px]">{edge.target}</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-3 text-gray-400">
-                        <div>
-                          <Zap className="w-3 h-3 inline mr-1" />
-                          {edge.latency_ms.toFixed(1)}ms
+                      <div className="grid grid-cols-3 gap-4 text-gray-400">
+                        <div className="flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          <span>{edge.latency_ms.toFixed(1)}ms</span>
                         </div>
-                        <div>
-                          <Activity className="w-3 h-3 inline mr-1" />
-                          {edge.requests_per_sec.toFixed(0)}/s
+                        <div className="flex items-center gap-1">
+                          <Activity className="w-3 h-3" />
+                          <span>{edge.requests_per_sec.toFixed(0)}/s</span>
                         </div>
                         <div>
                           {formatBytes(edge.bytes_sent + edge.bytes_received)}
@@ -509,11 +638,32 @@ export const ContainerTopology = () => {
               </motion.div>
             )}
           </AnimatePresence>
+          
+          {/* Legend */}
+          <div className="absolute top-3 left-3 p-2 bg-black/60 rounded-lg border border-white/10 backdrop-blur-sm">
+            <div className="text-[10px] text-gray-400 font-medium mb-1.5">Latency</div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                <div className="w-3 h-0.5 bg-green-400 rounded" /> &lt;1ms
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                <div className="w-3 h-0.5 bg-yellow-400 rounded" /> &lt;5ms
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                <div className="w-3 h-0.5 bg-pink-400 rounded" /> &gt;5ms
+              </div>
+            </div>
+          </div>
+
+          {/* Controls Hint */}
+          <div className="absolute bottom-3 right-3 text-[10px] text-gray-500 bg-black/60 px-2 py-1 rounded border border-white/5">
+            Scroll: zoom • Drag: pan • Click: select
+          </div>
         </div>
       ) : (
         /* Groups View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {networkGroups.map((group, idx) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-2">
+          {networkGroups.map((group) => (
             <div
               key={group.name}
               className="p-4 rounded-lg border"
@@ -524,12 +674,12 @@ export const ContainerTopology = () => {
             >
               <div className="flex items-center gap-2 mb-3">
                 <Network className="w-4 h-4" style={{ color: group.color.border }} />
-                <h4 className="font-medium text-white">{group.name}</h4>
+                <h4 className="font-medium text-white text-sm truncate">{group.name}</h4>
                 <span className="text-xs text-gray-400 ml-auto">
-                  {group.containers.length} container{group.containers.length > 1 ? 's' : ''}
+                  {group.containers.length}
                 </span>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
                 {group.containers.map(container => {
                   const colors = getHealthColor(container.health);
                   const Icon = getContainerIcon(container.name);
@@ -538,47 +688,21 @@ export const ContainerTopology = () => {
                     <div 
                       key={container.id}
                       onClick={() => setSelectedNode(selectedNode === container.id ? null : container.id)}
-                      className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                      className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
                         selectedNode === container.id ? 'bg-white/20' : 'bg-white/5 hover:bg-white/10'
                       }`}
                     >
-                      <div className={`p-1.5 rounded ${colors.bg}`}>
-                        <Icon className={`w-4 h-4 ${colors.text}`} />
+                      <div className={`p-1 rounded ${colors.bg}`}>
+                        <Icon className={`w-3 h-3 ${colors.text}`} />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">
-                          {container.name.replace(/ancientreport-/i, '').replace(/^\//, '')}
-                        </p>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <span>{container.cpu_percent.toFixed(1)}% CPU</span>
-                          <span>{container.memory_mb.toFixed(0)} MB</span>
-                        </div>
-                      </div>
-                      <div className={`w-2 h-2 rounded-full`} style={{ backgroundColor: colors.fill }} />
+                      <span className="text-xs text-white truncate flex-1">
+                        {container.name.replace(/ancientreport-/i, '').replace(/^\//, '')}
+                      </span>
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: colors.fill }} />
                     </div>
                   );
                 })}
               </div>
-              
-              {/* Network Connections */}
-              {topology.edges.filter(e => 
-                group.containers.some(c => c.id === e.source) &&
-                group.containers.some(c => c.id === e.target)
-              ).length > 0 && (
-                <div className="mt-3 pt-3 border-t border-white/10">
-                  <p className="text-xs text-gray-400 mb-2">Internal Connections</p>
-                  {topology.edges.filter(e => 
-                    group.containers.some(c => c.id === e.source) &&
-                    group.containers.some(c => c.id === e.target)
-                  ).map(edge => (
-                    <div key={edge.id} className="flex items-center gap-1 text-xs text-gray-300">
-                      <span>{edge.source.replace(/ancientreport-/i, '')}</span>
-                      <ChevronRight className="w-3 h-3 text-neon-blue" />
-                      <span>{edge.target.replace(/ancientreport-/i, '')}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
         </div>
@@ -594,7 +718,7 @@ export const ContainerTopology = () => {
             className="mt-4 p-4 bg-white/5 rounded-lg border border-white/10"
           >
             <div className="flex items-center justify-between mb-3">
-              <h4 className="font-semibold text-white flex items-center gap-2">
+              <h4 className="font-semibold text-white flex items-center gap-2 text-sm">
                 {(() => {
                   const Icon = getContainerIcon(selectedNodeDetails.container.name);
                   return <Icon className="w-4 h-4 text-neon-blue" />;
@@ -611,25 +735,25 @@ export const ContainerTopology = () => {
             
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
               <div className="p-2 bg-white/5 rounded">
-                <div className="text-xs text-gray-400">CPU</div>
-                <div className="text-sm font-medium text-white">
-                  {selectedNodeDetails.container.cpu_percent.toFixed(1)}%
+                <div className="text-[10px] text-gray-400">Status</div>
+                <div className={`text-sm font-medium ${selectedNodeDetails.container.status === 'running' ? 'text-neon-green' : 'text-red-400'}`}>
+                  {selectedNodeDetails.container.status}
                 </div>
               </div>
               <div className="p-2 bg-white/5 rounded">
-                <div className="text-xs text-gray-400">Memory</div>
-                <div className="text-sm font-medium text-white">
-                  {selectedNodeDetails.container.memory_mb.toFixed(0)} MB
+                <div className="text-[10px] text-gray-400">Health</div>
+                <div className={`text-sm font-medium ${getHealthColor(selectedNodeDetails.container.health).text}`}>
+                  {selectedNodeDetails.container.health}
                 </div>
               </div>
               <div className="p-2 bg-white/5 rounded">
-                <div className="text-xs text-gray-400">In</div>
+                <div className="text-[10px] text-gray-400">Traffic In</div>
                 <div className="text-sm font-medium text-neon-green">
                   {formatBytes(selectedNodeDetails.total_bytes_in)}
                 </div>
               </div>
               <div className="p-2 bg-white/5 rounded">
-                <div className="text-xs text-gray-400">Out</div>
+                <div className="text-[10px] text-gray-400">Traffic Out</div>
                 <div className="text-sm font-medium text-neon-blue">
                   {formatBytes(selectedNodeDetails.total_bytes_out)}
                 </div>
@@ -640,14 +764,15 @@ export const ContainerTopology = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {selectedNodeDetails.outgoing_connections?.length > 0 && (
                 <div>
-                  <div className="text-xs text-gray-400 mb-1">Outgoing</div>
-                  <div className="space-y-1">
+                  <div className="text-xs text-gray-400 mb-1 flex items-center gap-1">
+                    <ArrowRight className="w-3 h-3" /> Outgoing ({selectedNodeDetails.outgoing_connections.length})
+                  </div>
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
                     {selectedNodeDetails.outgoing_connections.map((conn: ConnectionEdge) => (
-                      <div key={conn.id} className="flex items-center gap-2 text-xs text-gray-300 py-1">
+                      <div key={conn.id} className="flex items-center gap-2 text-xs text-gray-300 p-1 bg-white/5 rounded">
                         <ChevronRight className="w-3 h-3 text-neon-blue" />
-                        <span>{conn.target}</span>
-                        <span className="text-gray-500">:{conn.target_port}</span>
-                        <span className="ml-auto text-gray-400">{conn.latency_ms.toFixed(1)}ms</span>
+                        <span className="truncate flex-1">{conn.target}</span>
+                        <span className="text-gray-500">{conn.latency_ms.toFixed(1)}ms</span>
                       </div>
                     ))}
                   </div>
@@ -655,14 +780,15 @@ export const ContainerTopology = () => {
               )}
               {selectedNodeDetails.incoming_connections?.length > 0 && (
                 <div>
-                  <div className="text-xs text-gray-400 mb-1">Incoming</div>
-                  <div className="space-y-1">
+                  <div className="text-xs text-gray-400 mb-1 flex items-center gap-1">
+                    <ArrowRight className="w-3 h-3 rotate-180" /> Incoming ({selectedNodeDetails.incoming_connections.length})
+                  </div>
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
                     {selectedNodeDetails.incoming_connections.map((conn: ConnectionEdge) => (
-                      <div key={conn.id} className="flex items-center gap-2 text-xs text-gray-300 py-1">
+                      <div key={conn.id} className="flex items-center gap-2 text-xs text-gray-300 p-1 bg-white/5 rounded">
                         <ChevronRight className="w-3 h-3 text-neon-green rotate-180" />
-                        <span>{conn.source}</span>
-                        <span className="text-gray-500">→ :{conn.target_port}</span>
-                        <span className="ml-auto text-gray-400">{conn.requests_per_sec.toFixed(0)}/s</span>
+                        <span className="truncate flex-1">{conn.source}</span>
+                        <span className="text-gray-500">{conn.requests_per_sec.toFixed(0)}/s</span>
                       </div>
                     ))}
                   </div>
@@ -672,27 +798,6 @@ export const ContainerTopology = () => {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Problems List */}
-      {topology.problems.length > 0 && (
-        <div className="mt-4 p-3 bg-red-400/5 border border-red-400/20 rounded-lg">
-          <div className="flex items-center gap-2 text-red-400 text-sm font-medium mb-2">
-            <AlertTriangle className="w-4 h-4" />
-            Active Problems
-          </div>
-          <div className="space-y-1 max-h-24 overflow-y-auto">
-            {topology.problems.map((problem) => (
-              <div key={problem.id} className="text-xs text-gray-300 flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${
-                  problem.severity === 'critical' ? 'bg-red-400' : 'bg-yellow-400'
-                }`} />
-                <span>{problem.message}</span>
-                <span className="text-gray-500">({problem.source_container})</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </motion.div>
   );
 };
