@@ -12,6 +12,9 @@ import { AlertCenter } from './components/AlertCenter';
 import { SettingsModal } from './components/SettingsModal';
 import { MonitorResultsWidget } from './components/MonitorResultsWidget';
 import { ContainerTopology } from './components/ContainerTopology';
+import { SecurityDashboard } from './components/SecurityDashboard';
+import { RemediationCenter } from './components/RemediationCenter';
+import { AIChat } from './components/AIChat';
 import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
 import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
 
@@ -799,6 +802,16 @@ function App() {
           <ContainerTopology />
         </div>
 
+        {/* Security Dashboard - Phase 5 */}
+        <div className="mt-8 mb-8">
+          <SecurityDashboard />
+        </div>
+
+        {/* Auto-Remediation - Phase 7 */}
+        <div className="mt-8 mb-8">
+          <RemediationCenter />
+        </div>
+
         {/* Custom Monitors & Healthchecks Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8 mb-8">
           {/* Custom Monitors Widget */}
@@ -883,6 +896,9 @@ function App() {
           </p>
         </div>
       </footer>
+      
+      {/* AI Chat Interface - Phase 6 */}
+      <AIChat />
     </div>
   )
 }

@@ -50,11 +50,17 @@ app.include_router(healthchecks.router, prefix="/api", tags=["healthchecks"])
 from api import alerts as alerts_api
 from api import topology as topology_api
 from api import ebpf_data as ebpf_api
+from api import security_scanning as sec_scan_api
+from api import ai_chat as ai_chat_api
+from api import auto_remediation as remediation_api
 app.include_router(custom_monitors.router, tags=["V3 Custom Monitors"])
 app.include_router(security_api.router, tags=["V3 Security"])
 app.include_router(alerts_api.router, tags=["V3 Alerts"])
 app.include_router(topology_api.router, tags=["V3 Topology"])
 app.include_router(ebpf_api.router, tags=["V3 eBPF Data"])
+app.include_router(sec_scan_api.router, tags=["V3 Security Scanning"])
+app.include_router(ai_chat_api.router, tags=["V3 AI Chat"])
+app.include_router(remediation_api.router, tags=["V3 Auto-Remediation"])
 
 # Import and register realtime WebSocket router
 from api import realtime

@@ -30,6 +30,7 @@ services:
       AGENT_HOSTNAME: ${AGENT_HOSTNAME:-auto-detect}
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/bpf:/sys/fs/bpf:ro
       - /proc:/host/proc:ro
       # Mount config directory instead of file to avoid Docker creating a directory
       - ./agent:/etc/AncientReport/config-source:ro

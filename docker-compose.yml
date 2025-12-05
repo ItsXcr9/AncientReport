@@ -67,6 +67,7 @@ services:
       NATS_ENABLED: ${NATS_ENABLED:-true}
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/bpf:/sys/fs/bpf:ro
       - /proc:/host/proc:ro
       # Mount config directory instead of file to avoid Docker creating a directory
       - ./agent:/etc/AncientReport/config-source:ro
@@ -105,6 +106,7 @@ services:
       # V2 Mode: Enable NATS ingestion gateway (comment out to use V1 legacy mode)
       NATS_URL: nats://nats:4222
     volumes:
+      - ./analysis/src:/app/src
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
