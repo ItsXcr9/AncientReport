@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { Activity, CheckCircle, XCircle, Clock, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ContainerHealthcheck {
   id: string;
@@ -20,6 +20,7 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [showAll, setShowAll] = useState(false);
 
   const fetchHealthchecks = async () => {
     try {
@@ -43,12 +44,28 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
   };
 
   useEffect(() => {
-    // Load once on mount and whenever selectedServer changes
     fetchHealthchecks();
-    // Then refresh every 3 minutes (180000ms) - healthchecks don't change frequently
     const interval = setInterval(fetchHealthchecks, 180000);
     return () => clearInterval(interval);
   }, [selectedServer]);
+
+  // Sort: problems first (unhealthy > starting > none > healthy)
+  const sortedHealthchecks = [...healthchecks].sort((a, b) => {
+    const priority: Record<string, number> = {
+      'unhealthy': 0,
+      'starting': 1,
+      'none': 2,
+      'healthy': 3
+    };
+    return (priority[a.health_status] || 4) - (priority[b.health_status] || 4);
+  });
+
+  // Split into visible (top 3) and rest
+  const visibleHealthchecks = sortedHealthchecks.slice(0, 3);
+  const otherHealthchecks = sortedHealthchecks.slice(3);
+
+  // Count problems
+  const problemCount = healthchecks.filter(h => h.health_status === 'unhealthy').length;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -86,6 +103,53 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
     return statusMap[status] || status;
   };
 
+  const HealthcheckCard = ({ hc, compact = false }: { hc: ContainerHealthcheck; compact?: boolean }) => (
+    <div
+      className={`p-4 rounded-lg border ${getStatusColor(hc.health_status)} ${compact ? 'p-3' : ''}`}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-3 flex-1">
+          {getStatusIcon(hc.health_status)}
+          <div className="flex-1">
+            <h3 className="font-medium text-sm">{hc.name}</h3>
+            {!compact && (
+              <p className="text-xs text-gray-400 mt-1 font-mono">
+                ID: {hc.id.substring(0, 12)}...
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="text-right">
+          <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(hc.health_status)}`}>
+            {getStatusBadge(hc.health_status)}
+          </span>
+          {hc.failing_streak > 0 && (
+            <p className="text-xs text-red-400 mt-1">
+              {hc.failing_streak} {hc.failing_streak === 1 ? 'failure' : 'failures'}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {!compact && hc.health_test && (
+        <div className="mt-2 pt-2 border-t border-white/10">
+          <p className="text-xs text-gray-400 mb-1">Healthcheck Command:</p>
+          <p className="text-xs font-mono text-gray-300 break-all">{hc.health_test}</p>
+        </div>
+      )}
+
+      {!compact && hc.last_log && (
+        <div className="mt-2 pt-2 border-t border-white/10">
+          <p className="text-xs text-gray-400 mb-1">Last Check Output:</p>
+          <p className="text-xs font-mono text-gray-300 break-all whitespace-pre-wrap">
+            {hc.last_log.substring(0, 200)}
+            {hc.last_log.length > 200 ? '...' : ''}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
   if (loading && healthchecks.length === 0) {
     return (
       <div className="glass-card rounded-xl p-6">
@@ -107,6 +171,11 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
           <span className="text-sm font-normal text-gray-400 ml-2">
             ({healthchecks.length} {healthchecks.length === 1 ? 'container' : 'containers'})
           </span>
+          {problemCount > 0 && (
+            <span className="ml-2 px-2 py-0.5 bg-red-500/20 border border-red-500/30 text-red-400 rounded text-xs font-medium">
+              {problemCount} problem{problemCount > 1 ? 's' : ''}
+            </span>
+          )}
         </h2>
         <div className="text-xs text-gray-400">
           Updated: {lastUpdated.toLocaleTimeString()}
@@ -125,55 +194,61 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
           No containers with healthchecks configured found.
         </div>
       ) : (
-        <div className="space-y-3">
-          {healthchecks.map((hc) => (
-            <div
-              key={hc.id}
-              className={`p-4 rounded-lg border ${getStatusColor(hc.health_status)}`}
-            >
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-3 flex-1">
-                  {getStatusIcon(hc.health_status)}
-                  <div className="flex-1">
-                    <h3 className="font-medium text-sm">{hc.name}</h3>
-                    <p className="text-xs text-gray-400 mt-1 font-mono">
-                      ID: {hc.id.substring(0, 12)}...
-                    </p>
+        <>
+          {/* Top 3 Visible Healthchecks */}
+          <div className="space-y-3">
+            {visibleHealthchecks.map((hc) => (
+              <HealthcheckCard key={hc.id} hc={hc} />
+            ))}
+          </div>
+
+          {/* Other Healthchecks - Expandable Scrollable */}
+          {otherHealthchecks.length > 0 && (
+            <div className="mt-4">
+              <button
+                onClick={() => setShowAll(!showAll)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 transition-colors"
+              >
+                <span className="text-sm text-gray-400">
+                  {showAll ? 'Hide' : 'Show'} {otherHealthchecks.length} more healthcheck{otherHealthchecks.length > 1 ? 's' : ''}
+                </span>
+                {showAll ? (
+                  <ChevronUp className="w-4 h-4 text-gray-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                )}
+              </button>
+              
+              {showAll && (
+                <div className="mt-3 max-h-60 overflow-y-auto rounded-lg border border-white/10">
+                  <div className="space-y-2 p-3">
+                    {otherHealthchecks.map((hc) => (
+                      <div 
+                        key={hc.id}
+                        className={`flex items-center gap-3 p-3 rounded-lg border ${getStatusColor(hc.health_status)}`}
+                      >
+                        {getStatusIcon(hc.health_status)}
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-sm truncate block">{hc.name}</span>
+                          <span className="text-xs text-gray-500">{hc.id.substring(0, 12)}...</span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(hc.health_status)}`}>
+                          {getStatusBadge(hc.health_status)}
+                        </span>
+                        {hc.failing_streak > 0 && (
+                          <span className="text-xs text-red-400">
+                            {hc.failing_streak}x
+                          </span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                </div>
-                <div className="text-right">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(hc.health_status)}`}>
-                    {getStatusBadge(hc.health_status)}
-                  </span>
-                  {hc.failing_streak > 0 && (
-                    <p className="text-xs text-red-400 mt-1">
-                      {hc.failing_streak} {hc.failing_streak === 1 ? 'failure' : 'failures'}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {hc.health_test && (
-                <div className="mt-2 pt-2 border-t border-white/10">
-                  <p className="text-xs text-gray-400 mb-1">Healthcheck Command:</p>
-                  <p className="text-xs font-mono text-gray-300 break-all">{hc.health_test}</p>
-                </div>
-              )}
-
-              {hc.last_log && (
-                <div className="mt-2 pt-2 border-t border-white/10">
-                  <p className="text-xs text-gray-400 mb-1">Last Check Output:</p>
-                  <p className="text-xs font-mono text-gray-300 break-all whitespace-pre-wrap">
-                    {hc.last_log.substring(0, 200)}
-                    {hc.last_log.length > 200 ? '...' : ''}
-                  </p>
                 </div>
               )}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );
 };
-
