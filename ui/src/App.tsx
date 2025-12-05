@@ -797,26 +797,21 @@ function App() {
           <DockerContainers selectedServer={selectedServer} />
         </div>
 
-        {/* Container Topology - Phase 4 */}
-        <div className="mt-8 mb-8">
-          <ContainerTopology />
-        </div>
-
         {/* Security Dashboard - Phase 5 */}
         <div className="mt-8 mb-8">
-          <SecurityDashboard />
+          <SecurityDashboard selectedServer={selectedServer} />
         </div>
 
         {/* Auto-Remediation - Phase 7 */}
         <div className="mt-8 mb-8">
-          <RemediationCenter />
+          <RemediationCenter selectedServer={selectedServer} />
         </div>
 
         {/* Custom Monitors & Healthchecks Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8 mb-8">
           {/* Custom Monitors Widget */}
           <div className="lg:col-span-1">
-            <MonitorResultsWidget />
+            <MonitorResultsWidget selectedServer={selectedServer} />
           </div>
           
           {/* Container Healthchecks */}
@@ -859,6 +854,11 @@ function App() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Container Topology - Phase 4 (After Metrics History) */}
+        <div className="mt-8 mb-8">
+          <ContainerTopology selectedServer={selectedServer} />
         </div>
 
         {/* Features Grid */}

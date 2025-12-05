@@ -65,8 +65,8 @@ class TopologyMap(BaseModel):
     last_updated: str
 
 
-# Cache for topology data - refreshed in background
-_topology_cache: Dict[str, Any] = {
+# Global Cache
+_topology_cache = {
     "nodes": [],
     "edges": [],
     "problems": [],
@@ -77,76 +77,76 @@ _cache_lock = threading.Lock()
 _cache_ttl = 30  # seconds
 
 
-def run_docker_command_fast(args: List[str], timeout: int = 10) -> tuple[bool, str]:
-    """Run a Docker command with fast timeout."""
+# Helper to run docker commands with timeout
+def run_docker_command_fast(args: List[str], timeout: int = 5) -> (bool, str):
     try:
         result = subprocess.run(
             ["docker"] + args,
-            capture_output=True, text=True, timeout=timeout
+            capture_output=True,
+            text=True,
+            timeout=timeout
         )
-        return result.returncode == 0, result.stdout.strip()
+        if result.returncode != 0:
+            return False, result.stderr
+        return True, result.stdout
     except subprocess.TimeoutExpired:
-        return False, ""
+        return False, "Timeout"
     except Exception as e:
-        logger.warning(f"Docker command failed: {e}")
-        return False, ""
+        return False, str(e)
 
 
-def discover_containers_sync() -> List[ContainerNode]:
+async def discover_containers() -> List[ContainerNode]:
     """
-    Synchronously discover containers using optimized batch Docker commands.
+    Discover running containers and their metadata using Docker CLI.
+    Optimized to use batch commands.
     """
     containers = []
     
-    # Single command to get all container info
+    # 1. Get all container IDs and basic info in one go
     success, output = run_docker_command_fast([
-        "ps", "-a", "--format", 
-        '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}"}'
+        "ps", "-a", "--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.State}}|{{.Status}}|{{.Ports}}"
     ])
     
-    if not success or not output:
-        return containers
-    
-    lines = output.strip().split("\n")
-    container_ids = []
+    if not success:
+        logger.error(f"Failed to list containers: {output}")
+        return []
+        
     container_data = {}
+    container_ids = []
     
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            data = json.loads(line)
-            container_id = data["id"]
-            container_ids.append(container_id)
+    for line in output.strip().split("\n"):
+        if "|" in line:
+            parts = line.split("|")
+            cid = parts[0]
+            name = parts[1]
             
-            # Parse health from status
-            health = "unknown"
-            status_lower = data["status"].lower()
-            if "healthy" in status_lower:
-                health = "healthy"
-            elif "unhealthy" in status_lower:
+            # Filter for our project containers
+            if "ancientreport" not in name.lower() and "clickhouse" not in name.lower() and "nats" not in name.lower():
+                # Optional: include everything if you want full system topology
+                pass
+            
+            # Determine health based on status string
+            status = "running" if "Up" in parts[4] else "stopped"
+            health = "healthy"
+            if "unhealthy" in parts[4].lower():
                 health = "critical"
-            elif data["state"] == "running":
-                health = "healthy"
-            elif data["state"] == "exited":
-                health = "critical"
-            
-            # Parse ports
-            ports = [p.strip() for p in data["ports"].split(",") if p.strip()] if data["ports"] else []
-            
-            container_data[container_id] = {
-                "id": container_id,
-                "name": data["name"],
-                "image": data["image"],
-                "status": data["state"],
+            elif "starting" in parts[4].lower():
+                health = "warning"
+            elif status != "running":
+                health = "unknown"
+                
+            container_data[cid] = {
+                "id": cid,
+                "name": name,
+                "image": parts[2],
+                "status": status,
                 "health": health,
-                "ports": ports,
-                "networks": ["default"],  # Will be updated below
-                "cpu_percent": 0.0,
-                "memory_mb": 0.0,
+                "ports": [p.strip() for p in parts[5].split(",") if p.strip()],
+                "networks": [],
+                "cpu_percent": 0.0, # Skip real-time stats for speed
+                "memory_mb": 0.0
             }
-        except json.JSONDecodeError:
-            continue
+            container_ids.append(cid)
     
     if not container_ids:
         return containers
@@ -168,151 +168,228 @@ def discover_containers_sync() -> List[ContainerNode]:
                         cdata["networks"] = networks if networks else ["default"]
                         break
     
-    # Convert to ContainerNode objects (skip stats for speed)
+    # Convert to ContainerNode objects
     for cid, cdata in container_data.items():
         containers.append(ContainerNode(**cdata))
     
     return containers
 
 
-def build_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
+def discover_containers_sync() -> List[ContainerNode]:
+    """Synchronous wrapper for discover_containers."""
+    return asyncio.run(discover_containers())
+
+
+# --- Real Connection Discovery ---
+
+async def get_container_ips() -> Dict[str, str]:
     """
-    Build connection edges based on container types and networks.
-    Uses heuristics instead of real network tracing for speed.
+    Get a mapping of IP addresses to container Names.
+    Returns: Dict[ip_address, container_name]
+    """
+    try:
+        # Inspect all networks to get IP mappings
+        # We need to list networks first
+        ls_success, ls_output = run_docker_command_fast(["network", "ls", "-q"])
+        if not ls_success:
+            return {}
+            
+        net_ids = ls_output.strip().split()
+        if not net_ids:
+            return {}
+
+        cmd = ["network", "inspect"] + net_ids
+        success, output = run_docker_command_fast(cmd, timeout=10)
+        
+        if not success:
+            logger.error("Failed to inspect networks")
+            return {}
+
+        networks = json.loads(output)
+        ip_map = {}
+        
+        for network in networks:
+            if 'Containers' in network and network['Containers']:
+                for cid, data in network['Containers'].items():
+                    # Strip CIDr from IPv4Address if present
+                    ip = data.get('IPv4Address', '').split('/')[0]
+                    if ip:
+                        ip_map[ip] = data.get('Name', cid)
+                        
+        return ip_map
+    except Exception as e:
+        logger.error(f"Error getting container IPs: {e}")
+        return {}
+
+
+def hex_to_ip(hex_str: str) -> str:
+    """Convert hex IP string (little-endian) to dotted decimal."""
+    try:
+        # Little-endian hex to IP
+        # e.g. 0100007F -> 127.0.0.1
+        ip_int = int(hex_str, 16)
+        return ".".join(str((ip_int >> i) & 0xFF) for i in [0, 8, 16, 24])
+    except:
+        return ""
+
+
+async def get_container_connections(container_id: str, ip_map: Dict[str, str]) -> List[ConnectionEdge]:
+    """
+    Get active connections for a specific container by reading /proc/net/tcp.
     """
     connections = []
+    try:
+        # Read /proc/net/tcp from the container
+        # We use 'cat' as it's available in almost all containers
+        success, output = run_docker_command_fast(["exec", container_id, "cat", "/proc/net/tcp"])
+        
+        if not success:
+            return []
+
+        lines = output.strip().splitlines()[1:] # Skip header
+        
+        seen_targets = set()
+        
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) < 4:
+                continue
+                
+            # State 01 is ESTABLISHED
+            state = parts[3]
+            if state != '01':
+                continue
+                
+            local_addr_hex, local_port_hex = parts[1].split(':')
+            rem_addr_hex, rem_port_hex = parts[2].split(':')
+            
+            rem_ip = hex_to_ip(rem_addr_hex)
+            rem_port = int(rem_port_hex, 16)
+            
+            # Check if remote IP belongs to a known container
+            if rem_ip in ip_map:
+                target_name = ip_map[rem_ip]
+                
+                # Avoid self-connections (localhost)
+                if target_name == container_id or target_name == ip_map.get(hex_to_ip(local_addr_hex)):
+                    continue
+                    
+                # Avoid duplicates
+                conn_key = f"{container_id}->{target_name}:{rem_port}"
+                if conn_key in seen_targets:
+                    continue
+                seen_targets.add(conn_key)
+
+                # Create connection object
+                # Note: We can't get real traffic stats from /proc/net/tcp easily without eBPF
+                # So we simulate reasonable metrics for established connections
+                connections.append(ConnectionEdge(
+                    id=f"conn-{container_id}-{target_name}-{rem_port}",
+                    source=container_id, # Use ID or Name? Let's use Name if possible, but ID is passed here.
+                    # Actually container_id passed here is ID. We should probably use Name for consistency.
+                    # But the caller passes ID. We'll resolve Name later or assume ID is Name (it's often Name in our logic)
+                    target=target_name,
+                    source_port=int(local_port_hex, 16),
+                    target_port=rem_port,
+                    protocol="tcp",
+                    # Simulated metrics for now - but the CONNECTION is real
+                    bytes_sent=random.randint(1000, 1000000),
+                    bytes_received=random.randint(1000, 1000000),
+                    latency_ms=random.uniform(0.1, 5.0),
+                    status="active",
+                    requests_per_sec=random.uniform(1.0, 100.0)
+                ))
+                
+        return connections
+    except Exception as e:
+        logger.error(f"Error getting connections for {container_id}: {e}")
+        return []
+
+
+async def discover_connections(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
+    """
+    Discover REAL inter-container connections by inspecting /proc/net/tcp.
+    """
+    all_connections = []
+    
+    # 1. Get IP mapping
+    ip_map = await get_container_ips()
+    if not ip_map:
+        logger.warning("Could not build IP map, falling back to heuristics")
+        return build_connections_heuristic(nodes)
+
+    # 2. Inspect each container
+    # We need to map ID to Name for the source
+    id_to_name = {n.id: n.name for n in nodes}
+    
+    tasks = []
+    for node in nodes:
+        # We pass node.id to docker exec, but we want node.name in the edge source
+        tasks.append(get_container_connections(node.id, ip_map))
+        
+    results = await asyncio.gather(*tasks)
+    
+    for i, res in enumerate(results):
+        # Fix up source name
+        source_name = nodes[i].name
+        for conn in res:
+            conn.source = source_name
+            all_connections.append(conn)
+        
+    # If we found very few connections (e.g. no traffic yet), maybe add some logical ones?
+    if not all_connections:
+        logger.info("No active TCP connections found, falling back to heuristics")
+        return build_connections_heuristic(nodes)
+        
+    return all_connections
+
+
+def build_connections_heuristic(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
+    """
+    Fallback: Build connection edges based on container types and networks.
+    """
+    connections = []
+    edge_id = 0
     
     # Categorize containers
     db_services = []
-    mq_services = []
     api_services = []
     ui_services = []
-    agents = []
-    others = []
     
     for node in nodes:
         name_lower = node.name.lower()
-        if node.status != "running":
-            continue
-            
-        if any(db in name_lower for db in ["clickhouse", "postgres", "mysql", "mongo", "redis", "mariadb", "elasticsearch"]):
+        if any(db in name_lower for db in ["clickhouse", "postgres", "mysql", "mongo", "redis", "nats"]):
             db_services.append(node)
-        elif any(mq in name_lower for mq in ["nats", "kafka", "rabbit", "redis"]):
-            mq_services.append(node)
-        elif any(api in name_lower for api in ["analysis", "api", "backend", "server", "app", "service"]):
+        elif any(api in name_lower for api in ["analysis", "api", "backend", "server"]):
             api_services.append(node)
-        elif any(ui in name_lower for ui in ["ui", "frontend", "nginx", "web", "caddy", "proxy"]):
+        elif any(ui in name_lower for ui in ["ui", "frontend", "nginx"]):
             ui_services.append(node)
-        elif "agent" in name_lower:
-            agents.append(node)
-        else:
-            others.append(node)
-    
-    edge_id = 0
-    
-    # Group by network for smarter connections
-    network_groups: Dict[str, List[ContainerNode]] = {}
-    for node in nodes:
-        for net in node.networks:
-            if net not in network_groups:
-                network_groups[net] = []
-            network_groups[net].append(node)
-    
-    # Create connections within each network
-    for network, group_nodes in network_groups.items():
-        if network in ["host", "none", "bridge"]:
-            continue
             
-        # 1. Connect UI/Proxy -> API/App
-        for ui in [n for n in group_nodes if n in ui_services]:
-            targets = [n for n in group_nodes if n in api_services or n in others]
-            for target in targets:
-                if ui.id == target.id: continue
-                edge_id += 1
-                connections.append(ConnectionEdge(
-                    id=f"edge-{edge_id}",
-                    source=ui.name,
-                    target=target.name,
-                    source_port=80,
-                    target_port=8080,
-                    protocol="tcp",
-                    bytes_sent=random.randint(50000, 500000),
-                    bytes_received=random.randint(200000, 2000000),
-                    latency_ms=round(random.uniform(0.5, 5.0), 1),
-                    status="active",
-                    requests_per_sec=round(random.uniform(10, 100), 1),
-                ))
-        
-        # 2. Connect API/App -> DB/MQ
-        for api in [n for n in group_nodes if n in api_services or n in others]:
-            targets = [n for n in group_nodes if n in db_services or n in mq_services]
-            for target in targets:
-                if api.id == target.id: continue
-                edge_id += 1
-                connections.append(ConnectionEdge(
-                    id=f"edge-{edge_id}",
-                    source=api.name,
-                    target=target.name,
-                    source_port=0,
-                    target_port=5432,
-                    protocol="tcp",
-                    bytes_sent=random.randint(20000, 200000),
-                    bytes_received=random.randint(100000, 1000000),
-                    latency_ms=round(random.uniform(0.2, 2.0), 1),
-                    status="active",
-                    requests_per_sec=round(random.uniform(50, 500), 1),
-                ))
-        
-        # 3. Connect Agents -> DB/MQ/API
-        for agent in [n for n in group_nodes if n in agents]:
-            targets = [n for n in group_nodes if n in db_services or n in mq_services or n in api_services]
-            for target in targets:
-                if agent.id == target.id: continue
-                edge_id += 1
-                connections.append(ConnectionEdge(
-                    id=f"edge-{edge_id}",
-                    source=agent.name,
-                    target=target.name,
-                    source_port=0,
-                    target_port=4222,
-                    protocol="tcp",
-                    bytes_sent=random.randint(100000, 1000000),
-                    bytes_received=random.randint(10000, 100000),
-                    latency_ms=round(random.uniform(0.5, 2.0), 1),
-                    status="active",
-                    requests_per_sec=round(random.uniform(20, 200), 1),
-                ))
-        
-        # 4. Fallback: If a container has no connections yet, connect it to something in the same network
-        # This ensures we don't have isolated nodes if they are in a shared network
-        for node in group_nodes:
-            has_connection = False
-            for conn in connections:
-                if conn.source == node.name or conn.target == node.name:
-                    has_connection = True
-                    break
+    # Simple heuristic connections
+    for ui in ui_services:
+        for api in api_services:
+            edge_id += 1
+            connections.append(ConnectionEdge(
+                id=f"edge-h-{edge_id}", source=ui.name, target=api.name,
+                source_port=0, target_port=8080, protocol="tcp", status="active",
+                latency_ms=1.5, requests_per_sec=10.0
+            ))
             
-            if not has_connection and len(group_nodes) > 1:
-                # Find a random partner in the same network
-                partners = [n for n in group_nodes if n.id != node.id]
-                if partners:
-                    partner = random.choice(partners)
-                    edge_id += 1
-                    connections.append(ConnectionEdge(
-                        id=f"edge-{edge_id}",
-                        source=node.name,
-                        target=partner.name,
-                        source_port=0,
-                        target_port=0,
-                        protocol="tcp",
-                        bytes_sent=random.randint(1000, 10000),
-                        bytes_received=random.randint(1000, 10000),
-                        latency_ms=round(random.uniform(1.0, 10.0), 1),
-                        status="active",
-                        requests_per_sec=round(random.uniform(1, 10), 1),
-                    ))
-
+    for api in api_services:
+        for db in db_services:
+            edge_id += 1
+            connections.append(ConnectionEdge(
+                id=f"edge-h-{edge_id}", source=api.name, target=db.name,
+                source_port=0, target_port=5432, protocol="tcp", status="active",
+                latency_ms=0.5, requests_per_sec=50.0
+            ))
+            
     return connections
+
+
+def discover_connections_sync(nodes: List[ContainerNode]) -> List[ConnectionEdge]:
+    """Synchronous wrapper for discover_connections."""
+    return asyncio.run(discover_connections(nodes))
 
 
 def detect_problems_sync(nodes: List[ContainerNode], edges: List[ConnectionEdge]) -> List[TopologyProblem]:
@@ -359,7 +436,8 @@ def refresh_cache_sync():
     try:
         start = time.time()
         nodes = discover_containers_sync()
-        edges = build_connections(nodes)
+        # Use REAL connection discovery
+        edges = discover_connections_sync(nodes)
         problems = detect_problems_sync(nodes, edges)
         
         with _cache_lock:

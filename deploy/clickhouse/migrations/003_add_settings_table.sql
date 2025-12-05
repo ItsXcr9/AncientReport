@@ -23,3 +23,4 @@ INSERT INTO AncientReport.settings (setting_key, setting_value, category, descri
 
 
 
+

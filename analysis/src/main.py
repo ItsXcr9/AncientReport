@@ -26,6 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Data retention configuration (in days)
+DATA_RETENTION_DAYS = int(os.getenv("DATA_RETENTION_DAYS", "3"))
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AncientReport AI Analysis Engine V3",
@@ -161,6 +164,18 @@ async def startup_event():
     )
     logger.info("✓ Scheduled bucket cleanup (runs every hour at :30)")
     
+    # Schedule data retention cleanup (daily at 3:00 AM)
+    scheduler.add_job(
+        cleanup_old_data,
+        'cron',
+        hour=3,
+        minute=0,
+        id='data_cleanup',
+        name='Data Retention Cleanup',
+        replace_existing=True
+    )
+    logger.info(f"✓ Scheduled data cleanup (daily at 3:00 AM, retention: {DATA_RETENTION_DAYS} days)")
+    
     scheduler.start()
     logger.info("✓ Scheduler started")
     
@@ -173,6 +188,21 @@ async def startup_event():
     if daily_job:
         next_daily = daily_job.next_run_time
         logger.info(f"   Next daily analysis: {next_daily}")
+    
+    # Verify security scanning scheduler is initialized
+    try:
+        from api.security_scanning import scheduler as sec_scheduler
+        if sec_scheduler is not None:
+            sec_job = sec_scheduler.get_job("daily_security_scan")
+            if sec_job:
+                next_sec_scan = sec_job.next_run_time
+                logger.info(f"✓ Security scan scheduler verified - Next scan: {next_sec_scan}")
+            else:
+                logger.warning("⚠ Security scan scheduler job not found")
+        else:
+            logger.warning("⚠ Security scan scheduler not initialized")
+    except Exception as e:
+        logger.warning(f"⚠ Could not verify security scan scheduler: {e}")
     
     # Start NATS ingestion gateway in V2 mode
     if v2_mode:
@@ -281,6 +311,74 @@ async def cleanup_buckets():
         logger.error("=" * 60)
         logger.error(f"❌ Bucket cleanup failed: {e}", exc_info=True)
         logger.error("=" * 60)
+
+
+async def cleanup_old_data():
+    """Delete data older than DATA_RETENTION_DAYS from ClickHouse tables."""
+    global clickhouse_client
+    
+    if not clickhouse_client:
+        logger.warning("ClickHouse client not available for cleanup")
+        return
+    
+    tables_to_cleanup = [
+        # (table_name, date_column)
+        ("docker_containers", "timestamp"),
+        ("security_scans", "timestamp"),
+        ("security_events", "timestamp"),
+        ("container_connections", "timestamp"),
+        ("custom_monitor_results", "timestamp"),
+        ("alert_history", "timestamp"),
+        ("hourly_reports", "timestamp"),
+        ("metrics", "timestamp"),
+        ("events", "timestamp"),
+    ]
+    
+    logger.info(f"🧹 Cleaning up data older than {DATA_RETENTION_DAYS} days...")
+    
+    total_deleted = 0
+    for table, date_col in tables_to_cleanup:
+        try:
+            # Use ALTER TABLE DELETE for efficient cleanup
+            query = f"""
+                ALTER TABLE {table} DELETE 
+                WHERE {date_col} < now() - INTERVAL {DATA_RETENTION_DAYS} DAY
+            """
+            clickhouse_client.execute(query)
+            logger.info(f"  ✓ Cleaned {table}")
+        except Exception as e:
+            # Table may not exist or have different schema
+            logger.debug(f"  - Skipped {table}: {e}")
+    
+    logger.info(f"✅ Data cleanup complete (retention: {DATA_RETENTION_DAYS} days)")
+
+
+async def get_storage_stats():
+    """Get storage usage statistics."""
+    import subprocess
+    
+    try:
+        # Get disk usage
+        result = subprocess.run(
+            ["df", "-h", "/"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")
+            if len(lines) >= 2:
+                parts = lines[1].split()
+                return {
+                    "filesystem": parts[0],
+                    "total": parts[1],
+                    "used": parts[2],
+                    "available": parts[3],
+                    "use_percent": parts[4],
+                    "mount": parts[5] if len(parts) > 5 else "/"
+                }
+    except Exception as e:
+        logger.error(f"Failed to get storage stats: {e}")
+    
+    return None
 
 
 @app.get("/")
@@ -419,19 +517,23 @@ async def get_latest_report(hostname: str = None):
         key = hostname if hostname else "all"
         report = latest_reports.get(key)
         
+        # Get storage info
+        storage_info = await get_storage_stats()
+        
         if report is None:
-            # If specific hostname report not found, try to trigger a quick analysis for it
-            # This is useful for the first time a server is selected
-            if hostname:
-                 # We won't await this to avoid blocking, but it means the first request might still return no data
-                 # Alternatively, we could just return a "no data" message
-                 pass
-
             return {
                 "report_id": None,
                 "system_health": {"overall_score": 0, "status": "no_data"},
-                "message": f"No reports available yet for {key}. Trigger an analysis to generate a report."
+                "message": f"No reports available yet for {key}. Trigger an analysis to generate a report.",
+                "storage_info": storage_info,
+                "data_retention_days": DATA_RETENTION_DAYS
             }
+        
+        # Add storage info to existing report
+        if isinstance(report, dict):
+            report["storage_info"] = storage_info
+            report["data_retention_days"] = DATA_RETENTION_DAYS
+            
         return report
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

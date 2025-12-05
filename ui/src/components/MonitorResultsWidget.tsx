@@ -27,7 +27,11 @@ interface MonitorConfig {
 
 const API_BASE = '';
 
-export const MonitorResultsWidget = () => {
+interface MonitorResultsWidgetProps {
+  selectedServer: string | null;
+}
+
+export const MonitorResultsWidget = ({ selectedServer }: MonitorResultsWidgetProps) => {
   const [monitors, setMonitors] = useState<MonitorConfig[]>([]);
   const [results, setResults] = useState<MonitorResult[]>([]);
   const [loading, setLoading] = useState(true);

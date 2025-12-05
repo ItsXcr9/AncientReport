@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Shield, AlertTriangle, FileText, Activity, 
-  Search, RefreshCw, Clock, Calendar
+  Search, RefreshCw, Clock, Calendar, CheckCircle, XCircle, AlertCircle
 } from 'lucide-react';
 
 interface Vulnerability {
@@ -49,12 +49,6 @@ interface RuntimeSecurityEvent {
   details: string;
 }
 
-interface ScheduleInfo {
-  enabled: boolean;
-  next_run: string | null;
-  last_run: string | null;
-  cron_expression: string;
-}
 
 interface SecurityStats {
   vulnerabilities_total: number;
@@ -66,28 +60,59 @@ interface SecurityStats {
   average_score: number;
   scheduled_scan_enabled: boolean;
   last_scheduled_scan: string | null;
+  last_scheduled_scan_status?: string | null;
+}
+
+interface HealthStatus {
+  status: string;
+  scheduler_enabled: boolean;
+  scheduler_next_run: string | null;
+  trivy_available: boolean;
+  nvd_api_available: boolean;
+  last_scan_status: string | null;
+  last_scan_time: string | null;
+  components: {
+    scheduler?: { status: string; next_run?: string };
+    trivy?: { status: string; available: boolean };
+    nvd_api?: { status: string; available: boolean };
+    last_scan?: { status: string; timestamp?: string };
+  };
+}
+
+interface ScheduleInfo {
+  enabled: boolean;
+  next_run: string | null;
+  last_run: string | null;
+  last_run_status?: string | null;
+  cron_expression: string;
 }
 
 const API_BASE = '';
 
-export const SecurityDashboard = () => {
+interface SecurityDashboardProps {
+  selectedServer: string | null;
+}
+
+export const SecurityDashboard = ({ selectedServer }: SecurityDashboardProps) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'vulnerabilities' | 'fim' | 'runtime'>('overview');
   const [scans, setScans] = useState<SecurityScanResult[]>([]);
   const [fimEvents, setFimEvents] = useState<FileIntegrityEvent[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeSecurityEvent[]>([]);
   const [stats, setStats] = useState<SecurityStats | null>(null);
   const [schedule, setSchedule] = useState<ScheduleInfo | null>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [scansRes, fimRes, runtimeRes, statsRes, scheduleRes] = await Promise.all([
+      const [scansRes, fimRes, runtimeRes, statsRes, scheduleRes, healthRes] = await Promise.all([
         fetch(`${API_BASE}/api/v3/security/scanning/results`),
         fetch(`${API_BASE}/api/v3/security/scanning/file-integrity`),
         fetch(`${API_BASE}/api/v3/security/scanning/runtime`),
         fetch(`${API_BASE}/api/v3/security/scanning/stats`),
-        fetch(`${API_BASE}/api/v3/security/scanning/schedule`)
+        fetch(`${API_BASE}/api/v3/security/scanning/schedule`),
+        fetch(`${API_BASE}/api/v3/security/scanning/health`)
       ]);
 
       if (scansRes.ok) setScans(await scansRes.json());
@@ -95,6 +120,7 @@ export const SecurityDashboard = () => {
       if (runtimeRes.ok) setRuntimeEvents(await runtimeRes.json());
       if (statsRes.ok) setStats(await statsRes.json());
       if (scheduleRes.ok) setSchedule(await scheduleRes.json());
+      if (healthRes.ok) setHealth(await healthRes.json());
     } catch (error) {
       console.error('Failed to fetch security data:', error);
     } finally {
@@ -141,6 +167,24 @@ export const SecurityDashboard = () => {
     return 'text-red-500';
   };
 
+  const getHealthStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'healthy': return 'text-green-500 bg-green-500/10 border-green-500/20';
+      case 'degraded': return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
+      case 'unhealthy': return 'text-red-500 bg-red-500/10 border-red-500/20';
+      default: return 'text-gray-500 bg-gray-500/10 border-gray-500/20';
+    }
+  };
+
+  const getHealthIcon = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'healthy': return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'degraded': return <AlertCircle className="w-4 h-4 text-yellow-500" />;
+      case 'unhealthy': return <XCircle className="w-4 h-4 text-red-500" />;
+      default: return <AlertCircle className="w-4 h-4 text-gray-500" />;
+    }
+  };
+
   if (loading) {
     return (
       <div className="glass-card p-6 rounded-xl flex items-center justify-center h-64">
@@ -163,6 +207,14 @@ export const SecurityDashboard = () => {
         </div>
         
         <div className="flex items-center gap-4">
+          {/* Health Status */}
+          {health && (
+            <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border ${getHealthStatusColor(health.status)}`}>
+              {getHealthIcon(health.status)}
+              <span className="font-medium">{health.status.toUpperCase()}</span>
+            </div>
+          )}
+          
           {/* Schedule Info */}
           {schedule && schedule.enabled && (
             <div className="flex items-center gap-2 text-xs text-gray-400 bg-white/5 px-3 py-1.5 rounded-lg">
@@ -212,6 +264,77 @@ export const SecurityDashboard = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
+            {/* Health Status Card */}
+            {health && (
+              <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10">
+                <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">System Health</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="flex items-center gap-3">
+                    {getHealthIcon(health.components.scheduler?.status || 'unknown')}
+                    <div>
+                      <div className="text-sm text-white font-medium">Scheduler</div>
+                      <div className="text-xs text-gray-400">
+                        {health.scheduler_enabled ? 'Enabled' : 'Disabled'}
+                        {health.scheduler_next_run && (
+                          <span className="ml-2">• Next: {new Date(health.scheduler_next_run).toLocaleString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {health.trivy_available ? (
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-red-500" />
+                    )}
+                    <div>
+                      <div className="text-sm text-white font-medium">Trivy Scanner</div>
+                      <div className="text-xs text-gray-400">
+                        {health.trivy_available ? 'Online' : 'Offline'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {health.nvd_api_available ? (
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-yellow-500" />
+                    )}
+                    <div>
+                      <div className="text-sm text-white font-medium">NVD Database</div>
+                      <div className="text-xs text-gray-400">
+                        {health.nvd_api_available ? 'Connected' : 'Unavailable'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {health.last_scan_status === 'success' ? (
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                    ) : health.last_scan_status === 'failed' ? (
+                      <XCircle className="w-5 h-5 text-red-500" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-gray-500" />
+                    )}
+                    <div>
+                      <div className="text-sm text-white font-medium">Last Scan</div>
+                      <div className="text-xs text-gray-400">
+                        {health.last_scan_time ? (
+                          <>
+                            {new Date(health.last_scan_time).toLocaleString()}
+                            {health.last_scan_status && (
+                              <span className={`ml-2 ${health.last_scan_status === 'success' ? 'text-green-500' : health.last_scan_status === 'failed' ? 'text-red-500' : 'text-yellow-500'}`}>
+                                ({health.last_scan_status})
+                              </span>
+                            )}
+                          </>
+                        ) : 'Never'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
               <div className="p-4 bg-white/5 rounded-lg border border-white/10">

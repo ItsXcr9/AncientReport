@@ -158,7 +158,11 @@ const calculateHierarchicalLayout = (nodes: ContainerNode[], width: number, heig
   return result;
 };
 
-export const ContainerTopology = () => {
+interface ContainerTopologyProps {
+  selectedServer: string | null;
+}
+
+export const ContainerTopology = ({ selectedServer }: ContainerTopologyProps) => {
   const [topology, setTopology] = useState<TopologyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);

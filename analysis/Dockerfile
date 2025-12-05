@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install Docker CLI
+# Install Docker CLI and Trivy
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -13,6 +13,9 @@ RUN apt-get update && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
     apt-get update && \
     apt-get install -y --no-install-recommends docker-cli && \
+    # Install Trivy
+    TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/') && \
+    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin ${TRIVY_VERSION} && \
     rm -rf /var/lib/apt/lists/*
 
 # Install dependencies

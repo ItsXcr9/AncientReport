@@ -36,7 +36,11 @@ interface SystemStatus {
 
 const API_BASE = '';
 
-export const RemediationCenter = () => {
+interface RemediationCenterProps {
+  selectedServer: string | null;
+}
+
+export const RemediationCenter = ({ selectedServer }: RemediationCenterProps) => {
   const [actions, setActions] = useState<RemediationAction[]>([]);
   const [jobs, setJobs] = useState<RemediationJob[]>([]);
   const [loading, setLoading] = useState(true);
