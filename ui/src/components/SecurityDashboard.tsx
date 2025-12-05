@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Shield, AlertTriangle, FileText, Activity, Lock, 
-  Search, Filter, ChevronDown, CheckCircle, XCircle 
+  Shield, AlertTriangle, FileText, Activity, 
+  Search, RefreshCw, Clock, Calendar
 } from 'lucide-react';
 
 interface Vulnerability {
@@ -49,6 +49,25 @@ interface RuntimeSecurityEvent {
   details: string;
 }
 
+interface ScheduleInfo {
+  enabled: boolean;
+  next_run: string | null;
+  last_run: string | null;
+  cron_expression: string;
+}
+
+interface SecurityStats {
+  vulnerabilities_total: number;
+  critical_vulns: number;
+  high_vulns: number;
+  scans_last_24h: number;
+  runtime_incidents: number;
+  fim_events: number;
+  average_score: number;
+  scheduled_scan_enabled: boolean;
+  last_scheduled_scan: string | null;
+}
+
 const API_BASE = '';
 
 export const SecurityDashboard = () => {
@@ -56,34 +75,54 @@ export const SecurityDashboard = () => {
   const [scans, setScans] = useState<SecurityScanResult[]>([]);
   const [fimEvents, setFimEvents] = useState<FileIntegrityEvent[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeSecurityEvent[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<SecurityStats | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+
+  const fetchData = async () => {
+    try {
+      const [scansRes, fimRes, runtimeRes, statsRes, scheduleRes] = await Promise.all([
+        fetch(`${API_BASE}/api/v3/security/scanning/results`),
+        fetch(`${API_BASE}/api/v3/security/scanning/file-integrity`),
+        fetch(`${API_BASE}/api/v3/security/scanning/runtime`),
+        fetch(`${API_BASE}/api/v3/security/scanning/stats`),
+        fetch(`${API_BASE}/api/v3/security/scanning/schedule`)
+      ]);
+
+      if (scansRes.ok) setScans(await scansRes.json());
+      if (fimRes.ok) setFimEvents(await fimRes.json());
+      if (runtimeRes.ok) setRuntimeEvents(await runtimeRes.json());
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (scheduleRes.ok) setSchedule(await scheduleRes.json());
+    } catch (error) {
+      console.error('Failed to fetch security data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [scansRes, fimRes, runtimeRes, statsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/v3/security/scanning/results`),
-          fetch(`${API_BASE}/api/v3/security/scanning/file-integrity`),
-          fetch(`${API_BASE}/api/v3/security/scanning/runtime`),
-          fetch(`${API_BASE}/api/v3/security/scanning/stats`)
-        ]);
-
-        if (scansRes.ok) setScans(await scansRes.json());
-        if (fimRes.ok) setFimEvents(await fimRes.json());
-        if (runtimeRes.ok) setRuntimeEvents(await runtimeRes.json());
-        if (statsRes.ok) setStats(await statsRes.json());
-      } catch (error) {
-        console.error('Failed to fetch security data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const triggerFullScan = async () => {
+    setScanning(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v3/security/scanning/trigger-all`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (error) {
+      console.error('Failed to trigger scan:', error);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const getSeverityColor = (severity: string) => {
     switch (severity.toLowerCase()) {
@@ -95,10 +134,17 @@ export const SecurityDashboard = () => {
     }
   };
 
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'text-green-500';
+    if (score >= 60) return 'text-yellow-500';
+    if (score >= 40) return 'text-orange-500';
+    return 'text-red-500';
+  };
+
   if (loading) {
     return (
       <div className="glass-card p-6 rounded-xl flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-neon-blue"></div>
+        <RefreshCw className="w-8 h-8 text-neon-blue animate-spin" />
       </div>
     );
   }
@@ -116,20 +162,46 @@ export const SecurityDashboard = () => {
           </div>
         </div>
         
-        <div className="flex gap-2">
-          {['overview', 'vulnerabilities', 'fim', 'runtime'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === tab 
-                  ? 'bg-neon-purple/20 text-neon-purple border border-neon-purple/30' 
-                  : 'text-gray-400 hover:bg-white/5'
-              }`}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
+        <div className="flex items-center gap-4">
+          {/* Schedule Info */}
+          {schedule && schedule.enabled && (
+            <div className="flex items-center gap-2 text-xs text-gray-400 bg-white/5 px-3 py-1.5 rounded-lg">
+              <Calendar className="w-3 h-3" />
+              <span>Daily scan at 2:00 AM</span>
+              {schedule.next_run && (
+                <span className="text-neon-purple">
+                  Next: {new Date(schedule.next_run).toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
+          
+          {/* Scan Button */}
+          <button
+            onClick={triggerFullScan}
+            disabled={scanning}
+            className="flex items-center gap-2 px-4 py-2 bg-neon-purple/20 hover:bg-neon-purple/30 text-neon-purple rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
+            {scanning ? 'Scanning...' : 'Scan Now'}
+          </button>
+          
+          {/* Tab Buttons */}
+          <div className="flex gap-2">
+            {['overview', 'vulnerabilities', 'fim', 'runtime'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab as any)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === tab 
+                    ? 'bg-neon-purple/20 text-neon-purple border border-neon-purple/30' 
+                    : 'text-gray-400 hover:bg-white/5'
+                }`}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -139,55 +211,105 @@ export const SecurityDashboard = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
           >
-            <div className="p-4 bg-white/5 rounded-lg border border-white/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400 text-sm">Security Score</span>
-                <Shield className="w-4 h-4 text-neon-green" />
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+              <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-sm">Security Score</span>
+                  <Shield className="w-4 h-4 text-neon-green" />
+                </div>
+                <div className={`text-2xl font-bold ${getScoreColor(stats?.average_score || 0)}`}>
+                  {stats?.average_score || 0}/100
+                </div>
+                <div className="mt-2 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-500 ${
+                      (stats?.average_score || 0) >= 80 ? 'bg-green-500' :
+                      (stats?.average_score || 0) >= 60 ? 'bg-yellow-500' :
+                      (stats?.average_score || 0) >= 40 ? 'bg-orange-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${stats?.average_score || 0}%` }}
+                  />
+                </div>
               </div>
-              <div className="text-2xl font-bold text-white">
-                {scans[0]?.score || 0}/100
+
+              <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-sm">Critical Vulns</span>
+                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                </div>
+                <div className="text-2xl font-bold text-red-500">
+                  {stats?.critical_vulns || 0}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Immediate action required</p>
               </div>
-              <div className="mt-2 h-2 bg-gray-700 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-neon-green transition-all duration-500"
-                  style={{ width: `${scans[0]?.score || 0}%` }}
-                />
+
+              <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-sm">High Severity</span>
+                  <AlertTriangle className="w-4 h-4 text-orange-500" />
+                </div>
+                <div className="text-2xl font-bold text-orange-500">
+                  {stats?.high_vulns || 0}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Should be addressed soon</p>
+              </div>
+
+              <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-sm">Runtime Incidents</span>
+                  <Activity className="w-4 h-4 text-orange-500" />
+                </div>
+                <div className="text-2xl font-bold text-white">
+                  {stats?.runtime_incidents || 0}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Last 24 hours</p>
+              </div>
+
+              <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-sm">File Changes</span>
+                  <FileText className="w-4 h-4 text-blue-500" />
+                </div>
+                <div className="text-2xl font-bold text-white">
+                  {stats?.fim_events || 0}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Integrity alerts</p>
               </div>
             </div>
 
-            <div className="p-4 bg-white/5 rounded-lg border border-white/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400 text-sm">Critical Vulns</span>
-                <AlertTriangle className="w-4 h-4 text-red-500" />
+            {/* Recent Scans */}
+            <div>
+              <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Recent Scans</h3>
+              <div className="space-y-3">
+                {scans.slice(0, 5).map(scan => (
+                  <div key={scan.id} className="p-4 bg-white/5 rounded-lg border border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                        scan.score >= 80 ? 'bg-green-500/20' : 
+                        scan.score >= 60 ? 'bg-yellow-500/20' : 'bg-red-500/20'
+                      }`}>
+                        <span className={`text-lg font-bold ${getScoreColor(scan.score)}`}>{scan.score}</span>
+                      </div>
+                      <div>
+                        <div className="text-white font-medium">{scan.target}</div>
+                        <div className="text-xs text-gray-500">
+                          {new Date(scan.completed_at).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className="text-sm text-gray-300">{scan.vulnerabilities.length} vulnerabilities</div>
+                        <div className="text-xs text-gray-500">
+                          {scan.vulnerabilities.filter(v => v.severity === 'critical').length} critical
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="text-2xl font-bold text-white">
-                {stats?.critical_vulns || 0}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Across all containers</p>
-            </div>
-
-            <div className="p-4 bg-white/5 rounded-lg border border-white/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400 text-sm">Runtime Incidents</span>
-                <Activity className="w-4 h-4 text-orange-500" />
-              </div>
-              <div className="text-2xl font-bold text-white">
-                {stats?.runtime_incidents || 0}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Last 24 hours</p>
-            </div>
-
-            <div className="p-4 bg-white/5 rounded-lg border border-white/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400 text-sm">File Changes</span>
-                <FileText className="w-4 h-4 text-blue-500" />
-              </div>
-              <div className="text-2xl font-bold text-white">
-                {stats?.fim_events || 0}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Integrity violations</p>
             </div>
           </motion.div>
         )}
@@ -197,9 +319,13 @@ export const SecurityDashboard = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="space-y-4"
+            className="space-y-4 max-h-[500px] overflow-y-auto"
           >
             {scans.flatMap(scan => scan.vulnerabilities.map(vuln => ({ ...vuln, target: scan.target })))
+              .sort((a, b) => {
+                const order = { critical: 0, high: 1, medium: 2, low: 3 };
+                return (order[a.severity as keyof typeof order] || 4) - (order[b.severity as keyof typeof order] || 4);
+              })
               .map((vuln, idx) => (
               <div key={`${vuln.id}-${idx}`} className="p-4 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors">
                 <div className="flex items-start justify-between">
@@ -230,7 +356,7 @@ export const SecurityDashboard = () => {
                 </div>
               </div>
             ))}
-            {scans.length === 0 && (
+            {scans.flatMap(s => s.vulnerabilities).length === 0 && (
               <div className="text-center py-12 text-gray-500">
                 No vulnerabilities detected
               </div>
@@ -243,7 +369,7 @@ export const SecurityDashboard = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="space-y-4"
+            className="space-y-4 max-h-[500px] overflow-y-auto"
           >
             {fimEvents.map((event) => (
               <div key={event.id} className="p-4 bg-white/5 rounded-lg border border-white/10">
@@ -268,6 +394,11 @@ export const SecurityDashboard = () => {
                 </div>
               </div>
             ))}
+            {fimEvents.length === 0 && (
+              <div className="text-center py-12 text-gray-500">
+                No file integrity events
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -276,7 +407,7 @@ export const SecurityDashboard = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="space-y-4"
+            className="space-y-4 max-h-[500px] overflow-y-auto"
           >
             {runtimeEvents.map((event) => (
               <div key={event.id} className="p-4 bg-white/5 rounded-lg border border-white/10 border-l-4 border-l-red-500">
@@ -285,17 +416,23 @@ export const SecurityDashboard = () => {
                     <Activity className="w-4 h-4 text-red-500" />
                     {event.rule_name}
                   </h4>
-                  <span className="text-xs text-gray-500">
-                    {new Date(event.timestamp).toLocaleTimeString()}
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getSeverityColor(event.severity)}`}>
+                    {event.severity.toUpperCase()}
                   </span>
                 </div>
                 <p className="text-gray-300 text-sm mb-3">{event.details}</p>
                 <div className="flex items-center gap-4 text-xs text-gray-400 bg-black/20 p-2 rounded">
                   <span>Container: {event.container_id}</span>
                   <span>Process: {event.process_name} (PID: {event.pid})</span>
+                  <span className="ml-auto">{new Date(event.timestamp).toLocaleTimeString()}</span>
                 </div>
               </div>
             ))}
+            {runtimeEvents.length === 0 && (
+              <div className="text-center py-12 text-gray-500">
+                No runtime security events
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

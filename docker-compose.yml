@@ -105,9 +105,11 @@ services:
       AI_MODEL: gemini-2.5-flash-lite
       # V2 Mode: Enable NATS ingestion gateway (comment out to use V1 legacy mode)
       NATS_URL: nats://nats:4222
+      # Auto-Remediation: Enable real Docker execution (set to false for simulation)
+      REMEDIATION_REAL_MODE: "true"
     volumes:
       - ./analysis/src:/app/src
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
