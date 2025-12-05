@@ -107,6 +107,8 @@ services:
       NATS_URL: nats://nats:4222
       # Auto-Remediation: Enable real Docker execution (set to false for simulation)
       REMEDIATION_REAL_MODE: "true"
+      # Host machine's hostname for multi-server support
+      SERVER_HOSTNAME: ${HOSTNAME:-unknown}
     volumes:
       - ./analysis/src:/app/src
       - /var/run/docker.sock:/var/run/docker.sock

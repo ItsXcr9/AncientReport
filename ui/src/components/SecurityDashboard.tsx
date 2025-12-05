@@ -106,11 +106,12 @@ export const SecurityDashboard = ({ selectedServer }: SecurityDashboardProps) =>
 
   const fetchData = async () => {
     try {
+      const hostnameParam = selectedServer ? `?hostname=${selectedServer}` : '';
       const [scansRes, fimRes, runtimeRes, statsRes, scheduleRes, healthRes] = await Promise.all([
-        fetch(`${API_BASE}/api/v3/security/scanning/results`),
+        fetch(`${API_BASE}/api/v3/security/scanning/results${hostnameParam}`),
         fetch(`${API_BASE}/api/v3/security/scanning/file-integrity`),
         fetch(`${API_BASE}/api/v3/security/scanning/runtime`),
-        fetch(`${API_BASE}/api/v3/security/scanning/stats`),
+        fetch(`${API_BASE}/api/v3/security/scanning/stats${hostnameParam}`),
         fetch(`${API_BASE}/api/v3/security/scanning/schedule`),
         fetch(`${API_BASE}/api/v3/security/scanning/health`)
       ]);
@@ -132,7 +133,7 @@ export const SecurityDashboard = ({ selectedServer }: SecurityDashboardProps) =>
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedServer]);
 
   const triggerFullScan = async () => {
     setScanning(true);

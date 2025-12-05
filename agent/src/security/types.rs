@@ -61,6 +61,34 @@ pub struct ScanResult {
     pub risk_score: u8,
 }
 
+/// Vulnerability from Trivy scan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Vulnerability {
+    pub id: String,
+    pub cve_id: Option<String>,
+    pub severity: String,
+    pub package: String,
+    pub version: String,
+    pub fixed_version: Option<String>,
+    pub description: String,
+    pub link: Option<String>,
+}
+
+/// Container scan result (from Trivy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerScanResult {
+    pub id: String,
+    pub hostname: String,
+    pub target: String,
+    pub scan_type: String,
+    pub status: String,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+    pub vulnerabilities: Vec<Vulnerability>,
+    pub score: u8,
+    pub error: Option<String>,
+}
+
 /// Security event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityEvent {

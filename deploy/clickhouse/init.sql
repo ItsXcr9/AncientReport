@@ -243,6 +243,20 @@ PARTITION BY toYYYYMM(timestamp)
 ORDER BY (hostname, timestamp)
 TTL timestamp + INTERVAL 90 DAY;
 
+-- Security Scan Results (vulnerability scans)
+CREATE TABLE IF NOT EXISTS security_scan_results (
+    id String,
+    target String,
+    scan_type String,
+    status String,
+    started_at String,
+    completed_at Nullable(String),
+    vulnerabilities String,  -- JSON array of vulnerabilities
+    score UInt8,
+    error String DEFAULT ''
+) ENGINE = ReplacingMergeTree()
+ORDER BY (id, started_at);
+
 -- Security Events & Alerts
 CREATE TABLE IF NOT EXISTS security_events (
     timestamp DateTime,

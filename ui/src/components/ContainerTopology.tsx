@@ -187,7 +187,9 @@ export const ContainerTopology = ({ selectedServer }: ContainerTopologyProps) =>
 
   const fetchTopology = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v3/topology/map`);
+      let url = `${API_BASE}/api/v3/topology/map`;
+      if (selectedServer) url += `?hostname=${selectedServer}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setTopology(data);
@@ -197,7 +199,7 @@ export const ContainerTopology = ({ selectedServer }: ContainerTopologyProps) =>
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedServer]);
 
   const fetchNodeDetails = useCallback(async (nodeId: string) => {
     try {

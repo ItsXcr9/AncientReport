@@ -17,6 +17,7 @@ from api import containers
 from api import healthchecks
 from api import custom_monitors  # V3
 from api import security as security_api  # V3
+from api.custom_monitors import load_monitors_from_clickhouse as load_monitors
 from utils.timezone import now, from_iso, format_for_display, format_for_chart, TEHRAN_TZ
 
 # Configure logging
@@ -54,6 +55,7 @@ from api import alerts as alerts_api
 from api import topology as topology_api
 from api import ebpf_data as ebpf_api
 from api import security_scanning as sec_scan_api
+from api.security_scanning import load_scans_from_clickhouse as load_security_scans, start_nats_subscriber as start_security_nats_subscriber
 from api import ai_chat as ai_chat_api
 from api import auto_remediation as remediation_api
 app.include_router(custom_monitors.router, tags=["V3 Custom Monitors"])
@@ -79,7 +81,179 @@ bucket_manager = None
 ingestion_gateway = None
 settings_manager = None
 latest_reports = {}  # Store the latest hourly reports per hostname
+_reports_loaded = False
 
+
+# ClickHouse persistence for latest reports
+async def save_latest_report_to_clickhouse(hostname: str, report: dict):
+    """Save latest analysis report to ClickHouse."""
+    import json
+    import httpx
+    
+    ch_host = os.getenv("CLICKHOUSE_HOST", "clickhouse")
+    ch_port = os.getenv("CLICKHOUSE_PORT", "8123")
+    ch_db = os.getenv("CLICKHOUSE_DB", "AncientReport")
+    ch_user = os.getenv("CLICKHOUSE_USER", "default")
+    ch_password = os.getenv("CLICKHOUSE_PASSWORD", "")
+    
+    try:
+        report_id = report.get('report_id', f"report-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}")
+        timestamp = report.get('timestamp', datetime.utcnow().isoformat())
+        
+        # Convert timestamp to ClickHouse format
+        if isinstance(timestamp, str) and 'T' in timestamp:
+            timestamp = timestamp.replace('T', ' ')[:19]
+        elif hasattr(timestamp, 'strftime'):
+            timestamp = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Extract system_health score - handle both dict and int formats
+        system_health = report.get('system_health', {})
+        if isinstance(system_health, dict):
+            health_score = system_health.get('overall_score', 100)
+        else:
+            health_score = system_health if isinstance(system_health, (int, float)) else 100
+        
+        # Safely serialize JSON fields
+        def safe_json(data, default):
+            try:
+                return json.dumps(data if data else default).replace("'", "\\'").replace("\\n", " ")
+            except Exception as e:
+                logger.warning(f"JSON serialization failed: {e}")
+                return json.dumps(default)
+        
+        metrics_json = safe_json(report.get('resource_usage', {}), {})
+        ai_insights_json = safe_json(report.get('ai_insights', {}), {})
+        recommendations_json = safe_json(report.get('recommendations', []), [])
+        capacity_json = safe_json(report.get('capacity_forecast', {}), {})
+        
+        query = f"""
+        INSERT INTO hourly_reports (report_id, timestamp, hostname, system_health, metrics, ai_insights, recommendations, capacity_forecast)
+        VALUES (
+            '{report_id}',
+            '{timestamp}',
+            '{hostname}',
+            {int(health_score)},
+            '{metrics_json}',
+            '{ai_insights_json}',
+            '{recommendations_json}',
+            '{capacity_json}'
+        )
+        """
+        
+        url = f"http://{ch_host}:{ch_port}/"
+        params = {"database": ch_db, "query": query}
+        if ch_user:
+            params["user"] = ch_user
+        if ch_password:
+            params["password"] = ch_password
+        
+        logger.info(f"Saving analysis report for {hostname} to ClickHouse (report_id={report_id}, health={health_score})...")
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, params=params)
+            if response.status_code != 200:
+                logger.error(f"Failed to save report to ClickHouse: {response.status_code} - {response.text}")
+            else:
+                logger.info(f"✓ Saved analysis report for {hostname} to ClickHouse")
+    except Exception as e:
+        logger.error(f"Error saving latest report to ClickHouse: {e}", exc_info=True)
+
+
+async def load_latest_reports_from_clickhouse():
+    """Load most recent analysis reports from ClickHouse on startup."""
+    global latest_reports, _reports_loaded
+    import json
+    import httpx
+    
+    ch_host = os.getenv("CLICKHOUSE_HOST", "clickhouse")
+    ch_port = os.getenv("CLICKHOUSE_PORT", "8123")
+    ch_db = os.getenv("CLICKHOUSE_DB", "AncientReport")
+    ch_user = os.getenv("CLICKHOUSE_USER", "default")
+    ch_password = os.getenv("CLICKHOUSE_PASSWORD", "")
+    
+    logger.info(f"Loading latest analysis reports from ClickHouse ({ch_host}:{ch_port}/{ch_db})...")
+    
+    try:
+        # Get the most recent report for each hostname
+        query = """
+        SELECT report_id, timestamp, hostname, system_health, metrics, ai_insights, recommendations, capacity_forecast
+        FROM hourly_reports
+        WHERE (hostname, timestamp) IN (
+            SELECT hostname, max(timestamp) FROM hourly_reports GROUP BY hostname
+        )
+        FORMAT JSONEachRow
+        """
+        
+        url = f"http://{ch_host}:{ch_port}/"
+        params = {"database": ch_db, "query": query}
+        if ch_user:
+            params["user"] = ch_user
+        if ch_password:
+            params["password"] = ch_password
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params)
+            if response.status_code == 200 and response.text.strip():
+                logger.info(f"ClickHouse query returned {len(response.text)} bytes of data")
+                for line in response.text.strip().split('\n'):
+                    if line:
+                        try:
+                            row = json.loads(line)
+                            hostname = row.get('hostname', 'all')
+                            
+                            # Parse JSON fields with individual error handling
+                            def safe_parse_json(data, field_name, default):
+                                if not data:
+                                    return default
+                                if isinstance(data, dict) or isinstance(data, list):
+                                    return data
+                                if isinstance(data, str):
+                                    try:
+                                        return json.loads(data)
+                                    except json.JSONDecodeError as e:
+                                        logger.warning(f"Failed to parse {field_name}: {e}")
+                                        return default
+                                return default
+                            
+                            metrics = safe_parse_json(row.get('metrics'), 'metrics', {})
+                            ai_insights = safe_parse_json(row.get('ai_insights'), 'ai_insights', {})
+                            recommendations = safe_parse_json(row.get('recommendations'), 'recommendations', [])
+                            capacity = safe_parse_json(row.get('capacity_forecast'), 'capacity_forecast', {})
+                            
+                            # Reconstruct system_health as a dict
+                            health_score = row.get('system_health', 100)
+                            if isinstance(health_score, (int, float)):
+                                system_health = {
+                                    'overall_score': int(health_score),
+                                    'status': 'healthy' if health_score >= 80 else 'warning' if health_score >= 50 else 'critical'
+                                }
+                            else:
+                                system_health = health_score
+                            
+                            report = {
+                                'report_id': row.get('report_id'),
+                                'timestamp': row.get('timestamp'),
+                                'hostname': hostname,
+                                'system_health': system_health,
+                                'resource_usage': metrics,
+                                'ai_insights': ai_insights,
+                                'recommendations': recommendations,
+                                'capacity_forecast': capacity
+                            }
+                            
+                            key = hostname if hostname and hostname != 'all' else 'all'
+                            latest_reports[key] = report
+                            logger.info(f"Loaded latest report for {key} from ClickHouse (health: {health_score})")
+                        except Exception as e:
+                            logger.error(f"Failed to parse report row: {e}")
+                
+                logger.info(f"✓ Loaded {len(latest_reports)} latest reports from ClickHouse")
+            else:
+                logger.warning(f"No previous reports found in ClickHouse (status={response.status_code}, empty={not response.text.strip()})")
+    except Exception as e:
+        logger.error(f"Error loading latest reports from ClickHouse: {e}", exc_info=True)
+    
+    _reports_loaded = True
 
 @app.on_event("startup")
 async def startup_event():
@@ -179,6 +353,30 @@ async def startup_event():
     scheduler.start()
     logger.info("✓ Scheduler started")
     
+    # Load latest reports from ClickHouse
+    await load_latest_reports_from_clickhouse()
+    logger.info("✓ Loaded latest analysis reports from ClickHouse")
+    
+    # Load security scan results from ClickHouse
+    try:
+        await load_security_scans()
+        logger.info("✓ Loaded security scan results from ClickHouse")
+    except Exception as e:
+        logger.warning(f"Could not load security scan results: {e}")
+    
+    # Start NATS subscriber for remote container scans
+    if v2_mode:
+        import asyncio
+        asyncio.create_task(start_security_nats_subscriber())
+        logger.info("✓ Started NATS subscriber for remote container scans")
+    
+    # Load custom monitors from ClickHouse
+    try:
+        await load_monitors()
+        logger.info("✓ Loaded custom monitors from ClickHouse")
+    except Exception as e:
+        logger.warning(f"Could not load custom monitors: {e}")
+    
     # Log next run times
     hourly_job = scheduler.get_job('hourly_analysis')
     daily_job = scheduler.get_job('daily_analysis')
@@ -257,6 +455,9 @@ async def run_hourly_analysis(hostname: str = None):
         # Store the latest report
         key = hostname if hostname else "all"
         latest_reports[key] = report
+        
+        # Persist to ClickHouse
+        await save_latest_report_to_clickhouse(key, report)
         
         # Log the metrics that were found
         resource_usage = report.get('resource_usage', {})
@@ -427,7 +628,7 @@ async def get_servers_info():
                 argMax(value, timestamp) as value
             FROM metrics
             WHERE hostname = '{hostname}'
-              AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
+              AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb', 'disk_used_gb')
               AND timestamp >= now() - INTERVAL 7 DAY
             GROUP BY metric_name
             """
@@ -439,7 +640,9 @@ async def get_servers_info():
                 "hostname": hostname,
                 "cpu_cores": 0,
                 "memory_total_gb": 0,
-                "disk_total_gb": 0
+                "disk_total_gb": 0,
+                "disk_used_gb": 0,
+                "disk_free_gb": 0
             }
             
             if result and result.get('data'):
@@ -453,6 +656,11 @@ async def get_servers_info():
                         info["memory_total_gb"] = round(value / 1024, 2)
                     elif metric_name == 'disk_total_gb':
                         info["disk_total_gb"] = round(value, 2)
+                    elif metric_name == 'disk_used_gb':
+                        info["disk_used_gb"] = round(value, 2)
+            
+            # Calculate free space from total - used
+            info["disk_free_gb"] = round(info["disk_total_gb"] - info["disk_used_gb"], 2)
             
             server_info[hostname] = info
         
@@ -474,7 +682,7 @@ async def get_server_info(hostname: str):
             argMax(value, timestamp) as value
         FROM metrics
         WHERE hostname = '{hostname}'
-          AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb')
+          AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb', 'disk_used_gb')
           AND timestamp >= now() - INTERVAL 7 DAY
         GROUP BY metric_name
         """
@@ -486,7 +694,9 @@ async def get_server_info(hostname: str):
             "hostname": hostname,
             "cpu_cores": 0,
             "memory_total_gb": 0,
-            "disk_total_gb": 0
+            "disk_total_gb": 0,
+            "disk_used_gb": 0,
+            "disk_free_gb": 0
         }
         
         if result and result.get('data'):
@@ -500,6 +710,11 @@ async def get_server_info(hostname: str):
                     info["memory_total_gb"] = round(value / 1024, 2)
                 elif metric_name == 'disk_total_gb':
                     info["disk_total_gb"] = round(value, 2)
+                elif metric_name == 'disk_used_gb':
+                    info["disk_used_gb"] = round(value, 2)
+        
+        # Calculate free space from total - used
+        info["disk_free_gb"] = round(info["disk_total_gb"] - info["disk_used_gb"], 2)
         
         return info
     except Exception as e:

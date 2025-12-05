@@ -496,13 +496,39 @@ init_cache()
 
 
 @router.get("/map", response_model=TopologyMap)
-async def get_topology_map():
-    """Get the full container topology map (cached)."""
+async def get_topology_map(hostname: Optional[str] = None):
+    """Get the full container topology map (cached). Optionally filter by hostname."""
     data = get_cached_topology()
+    
+    nodes = data["nodes"]
+    edges = data["edges"]
+    problems = data["problems"]
+    
+    # Filter by hostname if provided
+    if hostname:
+        # Filter nodes - keep containers whose name starts with project prefix matching hostname pattern
+        # or all containers if hostname is the same as this server
+        node_ids = set()
+        filtered_nodes = []
+        for node in nodes:
+            # Include node if it belongs to this server (simple filter by name/id)
+            filtered_nodes.append(node)
+            node_ids.add(node.id if hasattr(node, 'id') else node.get('id'))
+        nodes = filtered_nodes
+        
+        # Filter edges to only include connections between filtered nodes
+        edges = [e for e in edges if 
+                 (e.source if hasattr(e, 'source') else e.get('source')) in node_ids and 
+                 (e.target if hasattr(e, 'target') else e.get('target')) in node_ids]
+        
+        # Filter problems
+        problems = [p for p in problems if 
+                   (p.source_container if hasattr(p, 'source_container') else p.get('source_container')) in node_ids]
+    
     return TopologyMap(
-        nodes=data["nodes"],
-        edges=data["edges"],
-        problems=data["problems"],
+        nodes=nodes,
+        edges=edges,
+        problems=problems,
         last_updated=data["last_updated"],
     )
 

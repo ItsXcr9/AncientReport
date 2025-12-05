@@ -41,11 +41,12 @@ export const MonitorResultsWidget = ({ selectedServer }: MonitorResultsWidgetPro
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedServer]);
 
   const fetchData = async () => {
     try {
-      const monitorsRes = await fetch(`${API_BASE}/api/v3/monitors`);
+      const hostnameParam = selectedServer ? `?hostname=${selectedServer}` : '';
+      const monitorsRes = await fetch(`${API_BASE}/api/v3/monitors${hostnameParam}`);
       if (monitorsRes.ok) {
         const monitorsData = await monitorsRes.json();
         setMonitors(monitorsData);

@@ -16,7 +16,7 @@ use aggregator::MetricAggregator;
 use collectors::{ProcCollector, DockerCollector, EbpfCollector};
 use streaming::StreamingPublisher;
 use custom_monitors::CustomMonitorManager;
-use security::PortScanner;
+use security::{PortScanner, ContainerScanner};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -146,6 +146,60 @@ async fn main() -> Result<()> {
     });
     info!("✓ Security Scanner started");
 
+    // V3: Start Container Vulnerability Scanner (runs at 3 AM daily, different from analysis at 2 AM)
+    info!("Starting V3 Container Vulnerability Scanner...");
+    let container_nats_url = config.nats.as_ref().map(|n| n.url.clone());
+    let container_scan_enabled = use_streaming && container_nats_url.is_some();
+    let container_handle = tokio::spawn(async move {
+        if !container_scan_enabled {
+            info!("Container scanning disabled (NATS not available)");
+            return;
+        }
+        
+        let scanner = ContainerScanner::new();
+        
+        // Connect to NATS for publishing results
+        let nats_url = container_nats_url.unwrap();
+        let nats_client = match async_nats::connect(&nats_url).await {
+            Ok(client) => client,
+            Err(e) => {
+                error!("Failed to connect to NATS for container scanning: {}", e);
+                return;
+            }
+        };
+        
+        // Initial scan after 2 minutes
+        tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+        
+        // Run container scan and publish results
+        loop {
+            info!("🔍 Running container vulnerability scan...");
+            let results = scanner.scan_all_containers();
+            
+            for result in &results {
+                // Publish each scan result to NATS
+                match serde_json::to_vec(result) {
+                    Ok(payload) => {
+                        if let Err(e) = nats_client.publish("security.container_scan", payload.into()).await {
+                            error!("Failed to publish container scan to NATS: {}", e);
+                        } else {
+                            info!("Published scan for {} to NATS (hostname: {})", result.target, result.hostname);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to serialize container scan result: {}", e);
+                    }
+                }
+            }
+            
+            info!("✓ Container scan complete: {} containers scanned", results.len());
+            
+            // Wait 6 hours before next scan
+            tokio::time::sleep(tokio::time::Duration::from_secs(6 * 3600)).await;
+        }
+    });
+    info!("✓ Container Vulnerability Scanner started");
+
     // Start aggregator or streaming publisher based on mode
     let backend_handle = if use_streaming {
         let nats_url = config.nats.as_ref().unwrap().url.clone();
@@ -209,7 +263,8 @@ async fn main() -> Result<()> {
                 docker_handle, 
                 ebpf,
                 custom_monitor_handle,
-                security_handle
+                security_handle,
+                container_handle
             );
         } else {
             let _ = tokio::join!(
@@ -217,7 +272,8 @@ async fn main() -> Result<()> {
                 backend, 
                 docker_handle,
                 custom_monitor_handle,
-                security_handle
+                security_handle,
+                container_handle
             );
         }
     } else {
@@ -225,7 +281,8 @@ async fn main() -> Result<()> {
             proc_handle, 
             docker_handle,
             custom_monitor_handle,
-            security_handle
+            security_handle,
+            container_handle
         );
     }
 

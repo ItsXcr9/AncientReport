@@ -51,9 +51,10 @@ export const RemediationCenter = ({ selectedServer }: RemediationCenterProps) =>
 
   const fetchData = async () => {
     try {
+      const hostnameParam = selectedServer ? `&hostname=${selectedServer}` : '';
       const [actionsRes, jobsRes, statusRes] = await Promise.all([
         fetch(`${API_BASE}/api/v3/remediation/actions`),
-        fetch(`${API_BASE}/api/v3/remediation/jobs?limit=20`),
+        fetch(`${API_BASE}/api/v3/remediation/jobs?limit=20${hostnameParam}`),
         fetch(`${API_BASE}/api/v3/remediation/status`)
       ]);
 
@@ -72,7 +73,7 @@ export const RemediationCenter = ({ selectedServer }: RemediationCenterProps) =>
     fetchData();
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedServer]);
 
   const handleRefresh = () => {
     setRefreshing(true);

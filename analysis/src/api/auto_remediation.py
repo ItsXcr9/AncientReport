@@ -272,9 +272,13 @@ async def reject_job(job_id: str, user: str = "admin", reason: str = ""):
     return job
 
 @router.get("/jobs")
-async def get_jobs(limit: int = 20) -> List[RemediationJob]:
-    """Get recent remediation jobs."""
-    return jobs[:limit]
+async def get_jobs(limit: int = 20, hostname: Optional[str] = None) -> List[RemediationJob]:
+    """Get recent remediation jobs. Optionally filter by hostname."""
+    result = jobs
+    if hostname:
+        # Filter jobs by target name matching hostname
+        result = [j for j in jobs if hostname.lower() in j.target.lower()]
+    return result[:limit]
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str) -> RemediationJob:

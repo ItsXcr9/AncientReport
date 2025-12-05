@@ -73,9 +73,12 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     docker.io \
     tzdata \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     # Ensure docker binary is available at expected path
     && which docker && ln -sf $(which docker) /usr/bin/docker || echo "Docker already at /usr/bin/docker" \
+    # Install Trivy for container vulnerability scanning
+    && curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin \
     # Set timezone to Asia/Tehran
     && ln -snf /usr/share/zoneinfo/Asia/Tehran /etc/localtime \
     && echo "Asia/Tehran" > /etc/timezone
