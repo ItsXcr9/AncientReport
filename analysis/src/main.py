@@ -48,9 +48,11 @@ app.include_router(healthchecks.router, prefix="/api", tags=["healthchecks"])
 
 # Register V3 routers
 from api import alerts as alerts_api
+from api import topology as topology_api
 app.include_router(custom_monitors.router, tags=["V3 Custom Monitors"])
 app.include_router(security_api.router, tags=["V3 Security"])
 app.include_router(alerts_api.router, tags=["V3 Alerts"])
+app.include_router(topology_api.router, tags=["V3 Topology"])
 
 # Import and register realtime WebSocket router
 from api import realtime

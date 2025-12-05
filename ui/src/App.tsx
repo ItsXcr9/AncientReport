@@ -11,6 +11,7 @@ import { ContainerHealthchecks } from './components/ContainerHealthchecks';
 import { AlertCenter } from './components/AlertCenter';
 import { SettingsModal } from './components/SettingsModal';
 import { MonitorResultsWidget } from './components/MonitorResultsWidget';
+import { ContainerTopology } from './components/ContainerTopology';
 import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
 import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
 
@@ -791,6 +792,11 @@ function App() {
         {/* Docker Containers Section - Horizontal Layout */}
         <div className="mt-8 mb-8">
           <DockerContainers selectedServer={selectedServer} />
+        </div>
+
+        {/* Container Topology - Phase 4 */}
+        <div className="mt-8 mb-8">
+          <ContainerTopology />
         </div>
 
         {/* Custom Monitors & Healthchecks Row */}
