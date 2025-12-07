@@ -17,6 +17,7 @@ import { RemediationCenter } from './components/RemediationCenter';
 import { AIChat } from './components/AIChat';
 import { useRealtimeMetrics } from './hooks/useRealtimeMetrics';
 import { useRealtimeAlerts } from './hooks/useRealtimeAlerts';
+import { useConfig } from './hooks/useConfig';
 
 // New UI Components
 import { StatCard } from './components/ui/StatCard';
@@ -99,6 +100,9 @@ function App() {
   });
   
   useRealtimeAlerts();
+  
+  // Load UI feature configuration
+  const config = useConfig();
 
   useEffect(() => {
     fetchServers()
@@ -820,7 +824,8 @@ function App() {
           </div>
         </div>
 
-        {/* Metrics History Charts */}
+        {/* Metrics History Charts - Only show when server selected or config allows all servers view */}
+        {(selectedServer || config.features.metricsHistory.showForAllServers) && (
         <div className="mt-8">
           <h2 className="text-2xl font-semibold mb-4">Metrics History</h2>
           
@@ -855,11 +860,14 @@ function App() {
             </div>
           )}
         </div>
+        )}
 
         {/* Container Topology - Phase 4 (After Metrics History) */}
+        {config.features.containerTopology.enabled && (
         <div className="mt-8 mb-8">
           <ContainerTopology selectedServer={selectedServer} />
         </div>
+        )}
 
         {/* Features Grid */}
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">

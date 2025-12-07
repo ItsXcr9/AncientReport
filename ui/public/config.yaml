@@ -1,0 +1,11 @@
+# UI Feature Toggles Configuration
+# Edit these values to enable/disable UI features without code changes
+
+features:
+  # Container Topology - Docker container relationship mapping
+  containerTopology:
+    enabled: false  # Set to true to show Container Topology section
+
+  # Metrics History - CPU, Memory, Disk, Network charts
+  metricsHistory:
+    showForAllServers: false  # Set to true to show charts when "All Servers" is selected
