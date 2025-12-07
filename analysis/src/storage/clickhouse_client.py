@@ -18,9 +18,9 @@ class ClickHouseClient:
         self.user = user
         self.password = password
         
-        # Use clickhouse-driver's native protocol (port 9000)
-        # Note: docker-compose maps this to 6001
-        self.client = Client(host=host, port=9000, database=database, user=user, password=password)
+        # Use clickhouse-driver's native protocol (port 9000 inside Docker)
+        # Note: docker-compose maps this to 6001, and with network_mode: host we use that
+        self.client = Client(host=host, port=6001, database=database, user=user, password=password)
         
         logger.info(f"ClickHouse client initialized: {host}:{port}/{database} (user: {user})")
     
