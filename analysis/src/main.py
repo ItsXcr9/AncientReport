@@ -351,6 +351,17 @@ async def startup_event():
     )
     logger.info(f"✓ Scheduled data cleanup (daily at 3:00 AM, retention: {DATA_RETENTION_DAYS} days)")
     
+    # Schedule network metrics collection (every 5 seconds for time-series charts)
+    scheduler.add_job(
+        ebpf_api.collect_metrics_sample,
+        'interval',
+        seconds=5,
+        id='network_metrics_collection',
+        name='Network Metrics Collection',
+        replace_existing=True
+    )
+    logger.info("✓ Scheduled network metrics collection (every 5 seconds)")
+    
     scheduler.start()
     logger.info("✓ Scheduler started")
     
