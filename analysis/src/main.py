@@ -284,6 +284,7 @@ async def startup_event():
     # Set ClickHouse client in containers and healthchecks modules
     containers.set_clickhouse_client(clickhouse_client)
     healthchecks.set_clickhouse_client(clickhouse_client)
+    ebpf_api.set_clickhouse_client(clickhouse_client)
     
     # Initialize AI engine
     ai_provider = os.getenv("AI_PROVIDER", "google")
