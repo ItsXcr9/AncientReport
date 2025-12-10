@@ -643,7 +643,7 @@ impl ProcCollector {
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_active_connections".to_string(), active_connections as f64, tags.clone())).await?;
             
             // New Comprehensive Metrics
-            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_retransmits".to_string(), retransmits_detected as f64, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_retransmits".to_string(), retransmits as f64, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_time_wait".to_string(), time_wait as f64, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "system".to_string(), "softirq_net_percent".to_string(), softirq_percent, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "system".to_string(), "cpu_system_percent".to_string(), system_cpu_percent, tags.clone())).await?;
@@ -664,7 +664,7 @@ impl ProcCollector {
             v2_metric.latency_p50 = Some(latency_p50);
             v2_metric.latency_p90 = Some(latency_p50); // Approximate
             v2_metric.latency_p99 = Some(latency_p50); // Approximate
-            v2_metric.retransmits = Some(retransmits_detected);
+            v2_metric.retransmits = Some(retransmits);
             v2_metric.packet_drops = Some(total_drops);
             v2_metric.active_connections = Some(active_connections);
             v2_metric.established = Some(established);
