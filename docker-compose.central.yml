@@ -49,9 +49,7 @@ services:
 
   # Python analysis engine
   analysis:
-    build:
-      context: ./analysis
-      dockerfile: Dockerfile
+    image: ghcr.io/itsxcr9/ancientreport/analysis:latest
     container_name: AncientReport-analysis
     ports:
       - "6800:8800"
@@ -83,9 +81,7 @@ services:
 
   # React frontend
   ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
+    image: ghcr.io/itsxcr9/ancientreport/ui:latest
     container_name: AncientReport-ui
     ports:
       - "6080:3000"

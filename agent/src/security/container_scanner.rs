@@ -89,12 +89,14 @@ impl ContainerScanner {
         info!("Scanning container {} with Trivy...", container_name);
 
         // Run Trivy scan
+        // Note: Using 'image' instead of 'container' (more compatible across Trivy versions)
+        // Removed deprecated --no-progress flag (--quiet is sufficient)
         let output = Command::new("trivy")
             .args([
-                "container",
+                "image",
                 "--format", "json",
-                "--no-progress",
                 "--quiet",
+                "--scanners", "vuln",
                 container_name,
             ])
             .output();

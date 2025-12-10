@@ -47,9 +47,7 @@ services:
         tag: "{{.Name}}"
 
   agent:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile
+    image: ghcr.io/itsxcr9/ancientreport/agent:latest
     container_name: AncientReport-agent
     network_mode: host
     pid: "host" # Required to see host processes, not container processes
@@ -87,9 +85,7 @@ services:
 
   # Python analysis engine
   analysis:
-    build:
-      context: ./analysis
-      dockerfile: Dockerfile
+    image: ghcr.io/itsxcr9/ancientreport/analysis:latest
     container_name: AncientReport-analysis
     ports:
       - "6800:8800"
@@ -128,9 +124,7 @@ services:
 
   # React frontend (optional)
   ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
+    image: ghcr.io/itsxcr9/ancientreport/ui:latest
     container_name: AncientReport-ui
     ports:
       - "6080:3000"

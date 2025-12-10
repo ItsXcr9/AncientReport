@@ -919,6 +919,16 @@ class MetricsSample(BaseModel):
     established: int
     open_rate: float
     close_rate: float
+    # New metrics
+    time_wait: int = 0
+    close_wait: int = 0
+    softirq: float = 0.0
+    cpu_system_percent: float = 0.0
+    socket_queue_pressure: float = 0.0
+    disk_reads: float = 0.0
+    disk_writes: float = 0.0
+    disk_latency: float = 0.0
+    disk_usage: float = 0.0
     hostname: Optional[str] = None  # Added for per-server support
 
 class TimeSeriesResponse(BaseModel):
@@ -959,6 +969,10 @@ async def ensure_network_metrics_tables():
                 cpu_system_percent Float64,
                 softirq_net_percent Float64,
                 socket_queue_pressure Float64,
+                disk_reads Float64,
+                disk_writes Float64,
+                disk_latency Float64,
+                disk_usage Float64,
                 oom_risk UInt8
             ) ENGINE = MergeTree()
             ORDER BY (hostname, timestamp)
@@ -1013,6 +1027,10 @@ async def store_metrics_to_clickhouse(sample: MetricsSample, context: Optional['
             {context.cpu_system_percent if context else 0},
             {context.softirq_net_percent if context else 0},
             {context.socket_backlog_pressure if context else 0},
+            {sample.disk_reads},
+            {sample.disk_writes},
+            {sample.disk_latency},
+            {sample.disk_usage},
             {1 if context and context.oom_risk else 0}
         )""")
     except Exception as e:
@@ -1075,7 +1093,11 @@ async def get_metrics_from_clickhouse(
                 active_connections,
                 established,
                 open_rate,
-                close_rate
+                close_rate,
+                disk_reads,
+                disk_writes,
+                disk_latency,
+                disk_usage
             FROM network_metrics_ts
             WHERE {where_clause}
               AND timestamp >= now() - INTERVAL {minutes} MINUTE
@@ -1096,7 +1118,11 @@ async def get_metrics_from_clickhouse(
                 active_connections=row[7],
                 established=row[8],
                 open_rate=row[9],
-                close_rate=row[10]
+                close_rate=row[10],
+                disk_reads=row[11] if len(row) > 11 else 0,
+                disk_writes=row[12] if len(row) > 12 else 0,
+                disk_latency=row[13] if len(row) > 13 else 0,
+                disk_usage=row[14] if len(row) > 14 else 0
             ))
         
         if samples:
@@ -1116,14 +1142,29 @@ async def get_metrics_from_clickhouse(
                 maxIf(value, metric_name = 'network_packets_sent') as pkts_sent,
                 maxIf(value, metric_name = 'network_packets_received') as pkts_recv,
                 maxIf(value, metric_name = 'network_connection_open_rate') as open_rate,
+                maxIf(value, metric_name = 'network_connection_close_rate') as close_rate,
                 maxIf(value, metric_name = 'network_latency_p50') as latency,
-                maxIf(value, metric_name = 'network_active_connections') as active_opens
+                maxIf(value, metric_name = 'network_active_connections') as active_opens,
+                maxIf(value, metric_name = 'network_time_wait') as time_wait,
+                maxIf(value, metric_name = 'network_close_wait') as close_wait,
+                maxIf(value, metric_name = 'network_retransmits') as retransmits,
+                maxIf(value, metric_name = 'softirq_net_percent') as softirq,
+                maxIf(value, metric_name = 'cpu_system_percent') as cpu_system,
+                maxIf(value, metric_name = 'socket_queue_pressure') as socket_pressure,
+                maxIf(value, metric_name = 'disk_reads_per_sec') as disk_reads,
+                maxIf(value, metric_name = 'disk_writes_per_sec') as disk_writes,
+                maxIf(value, metric_name = 'disk_latency_ms') as disk_latency,
+                maxIf(value, metric_name = 'disk_usage_percent') as disk_usage
             FROM metrics
             WHERE {where_clause}
               AND timestamp >= now() - INTERVAL {minutes} MINUTE
               AND metric_name IN ('network_drops', 'network_bytes_sent', 'network_bytes_received', 
                                   'network_packets_sent', 'network_packets_received',
-                                  'network_connection_open_rate', 'network_latency_p50', 'network_active_connections')
+                                  'network_connection_open_rate', 'network_connection_close_rate', 
+                                  'network_latency_p50', 'network_active_connections',
+                                  'network_time_wait', 'network_close_wait', 'network_retransmits',
+                                  'softirq_net_percent', 'cpu_system_percent', 'socket_queue_pressure',
+                                  'disk_reads_per_sec', 'disk_writes_per_sec', 'disk_latency_ms', 'disk_usage_percent')
             GROUP BY ts
             ORDER BY ts DESC
             LIMIT 720
@@ -1137,8 +1178,19 @@ async def get_metrics_from_clickhouse(
             pkts_sent = int(row[5] or 0)
             pkts_recv = int(row[6] or 0)
             open_rate = float(row[7] or 0)
-            latency = float(row[8] or 0)
-            active_opens = int(row[9] or 0)
+            close_rate = float(row[8] or 0)
+            latency = float(row[9] or 0)
+            active_opens = int(row[10] or 0)
+            time_wait = int(row[11] or 0)
+            close_wait = int(row[12] or 0)
+            retransmits_val = int(row[13] or 0)
+            softirq = float(row[14] or 0)
+            cpu_system = float(row[15] or 0)
+            socket_pressure = float(row[16] or 0)            
+            disk_reads = float(row[17] or 0)
+            disk_writes = float(row[18] or 0)
+            disk_latency = float(row[19] or 0)
+            disk_usage = float(row[20] or 0)
             
             # Estimate connections if explicit metric missing
             if active_opens > 0:
@@ -1153,12 +1205,21 @@ async def get_metrics_from_clickhouse(
                 latency_p50=latency,
                 latency_p90=latency, # Approx
                 latency_p99=latency, # Approx
-                retransmits=0,
+                retransmits=retransmits_val,
                 packet_drops=drops,
                 active_connections=estimated_conns,
                 established=estimated_conns,
                 open_rate=open_rate,
-                close_rate=0
+                close_rate=close_rate,
+                time_wait=time_wait,
+                close_wait=close_wait,
+                softirq=softirq,
+                cpu_system_percent=cpu_system,
+                socket_queue_pressure=socket_pressure,
+                disk_reads=disk_reads,
+                disk_writes=disk_writes,
+                disk_latency=disk_latency,
+                disk_usage=disk_usage
             ))
         
         return samples
@@ -1995,7 +2056,10 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
               AND metric_name IN (
                 'network_drops', 'network_bytes_sent', 'network_bytes_received',
                 'network_packets_sent', 'network_packets_received',
-                'network_connection_open_rate', 'network_latency_p50', 'network_active_connections'
+                'network_connection_open_rate', 'network_connection_close_rate', 
+                'network_latency_p50', 'network_active_connections', 'network_established',
+                'network_time_wait', 'network_close_wait', 'network_retransmits',
+                'softirq_net_percent', 'cpu_system_percent', 'socket_queue_pressure'
               )
             GROUP BY metric_name
             """
@@ -2017,8 +2081,13 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                 
                 # New explicit metrics (Debian/Non-eBPF support)
                 open_rate = float(metrics_dict.get('network_connection_open_rate', 0.0))
+                close_rate = float(metrics_dict.get('network_connection_close_rate', 0.0))
                 latency_p50 = float(metrics_dict.get('network_latency_p50', 0.0))
                 active_opens = int(metrics_dict.get('network_active_connections', 0))
+                time_wait = int(metrics_dict.get('network_time_wait', 0))
+                close_wait = int(metrics_dict.get('network_close_wait', 0))
+                retransmits = int(metrics_dict.get('network_retransmits', 0))
+                established = int(metrics_dict.get('network_established', 0))
                 
                 # Estimate active connections if explicit metric missing
                 if active_opens == 0:
@@ -2135,12 +2204,12 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                     ),
                     connections=ConnectionStats(
                         active_connections=estimated_connections, 
-                        established=estimated_connections, 
-                        listen=0, time_wait=0, close_wait=0, 
-                        total_retransmits=0, 
+                        established=established if established > 0 else estimated_connections, 
+                        listen=0, time_wait=time_wait, close_wait=close_wait, 
+                        total_retransmits=retransmits, 
                         packet_drops=drops,
                         open_rate_per_sec=open_rate,
-                        close_rate_per_sec=0
+                        close_rate_per_sec=close_rate
                     ),
                     top_flows=top_flows
                 )

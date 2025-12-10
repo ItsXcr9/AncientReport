@@ -438,6 +438,83 @@ impl ProcCollector {
         
         let total_drops = total_rx_drops + total_tx_drops;
 
+        // 1.5. Read /proc/stat (SoftIRQ & System CPU)
+        let stat_content = match fs::read_to_string("/proc/stat").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/host/proc/stat").await.unwrap_or_default(),
+        };
+
+        let mut softirq = 0u64;
+        let mut system_cpu = 0u64;
+        let mut total_cpu = 0u64;
+
+        if let Some(first_line) = stat_content.lines().next() {
+             if first_line.starts_with("cpu ") {
+                 let parts: Vec<&str> = first_line.split_whitespace().collect();
+                 // cpu user nice system idle iowait irq softirq ...
+                 if parts.len() >= 8 {
+                     let user: u64 = parts[1].parse().unwrap_or(0);
+                     let nice: u64 = parts[2].parse().unwrap_or(0);
+                     let system: u64 = parts[3].parse().unwrap_or(0);
+                     let idle: u64 = parts[4].parse().unwrap_or(0);
+                     let iowait: u64 = parts[5].parse().unwrap_or(0);
+                     let irq: u64 = parts[6].parse().unwrap_or(0);
+                     let soft: u64 = parts[7].parse().unwrap_or(0);
+                     let steal: u64 = parts.get(8).and_then(|s| s.parse().ok()).unwrap_or(0);
+                     
+                     softirq = soft;
+                     system_cpu = system;
+                     total_cpu = user + nice + system + idle + iowait + irq + soft + steal;
+                 }
+             }
+        }
+
+        // 1.6 Read /proc/net/sockstat (TimeWait)
+        let sockstat_content = match fs::read_to_string("/proc/net/sockstat").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/host/proc/net/sockstat").await.unwrap_or_default(),
+        };
+        
+        let mut time_wait = 0u64;
+        for line in sockstat_content.lines() {
+            if line.starts_with("TCP: ") {
+                // TCP: inuse 8 orphan 0 tw 0 alloc 10 mem 1
+                if let Some(tw_idx) = line.find("tw ") {
+                    let after_tw = &line[tw_idx + 3..];
+                    let tw_val: Vec<&str> = after_tw.split_whitespace().collect();
+                    if let Some(val) = tw_val.first() {
+                        time_wait = val.parse().unwrap_or(0);
+                    }
+                }
+            }
+        }
+
+        // 1.7 Read /proc/net/netstat (Socket Pressure via TCPMemoryPressures)
+        let netstat_content = match fs::read_to_string("/proc/net/netstat").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/host/proc/net/netstat").await.unwrap_or_default(),
+        };
+        
+        let mut socket_pressure = 0u64;
+        // Format is 2 lines: headers then values
+        let mut headers: Vec<&str> = Vec::new();
+        for line in netstat_content.lines() {
+            if line.starts_with("TcpExt: ") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if headers.is_empty() {
+                    headers = parts;
+                } else {
+                    // This is the value line
+                    for (i, header) in headers.iter().enumerate() {
+                        if *header == "TCPMemoryPressures" && i < parts.len() {
+                            socket_pressure = parts[i].parse().unwrap_or(0);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. Read /proc/net/snmp (Retransmits & States)
         let snmp_content = match fs::read_to_string("/proc/net/snmp").await {
             Ok(content) => content,
@@ -505,6 +582,12 @@ impl ProcCollector {
             tx_drops: total_tx_drops,
             active_opens,
             passive_opens,
+            established,
+            retransmits,
+            softirq,
+            system_cpu,
+            socket_pressure,
+            total_cpu,
         };
 
         if let Some(ref last_stats) = self.last_net_stats {
@@ -518,6 +601,33 @@ impl ProcCollector {
             let current_opens = current_stats.active_opens + current_stats.passive_opens;
             let last_opens = last_stats.active_opens + last_stats.passive_opens;
             let connection_open_rate = ((current_opens.saturating_sub(last_opens)) as f64) / time_diff;
+            
+            // Calculate Close Rate: LastEst + Opens - CurrentEst = Closes
+            // Closes/sec = (LastEst + OpensDelta - CurrentEst) / time_diff
+            let total_opens_delta = current_opens.saturating_sub(last_opens);
+            let estimated_closes = (last_stats.established + total_opens_delta).saturating_sub(current_stats.established);
+            let connection_close_rate = (estimated_closes as f64) / time_diff;
+
+            // SoftIRQ % and System CPU %
+            let softirq_diff = current_stats.softirq.saturating_sub(last_stats.softirq);
+            let system_diff = current_stats.system_cpu.saturating_sub(last_stats.system_cpu);
+            let total_cpu_diff = current_stats.total_cpu.saturating_sub(last_stats.total_cpu);
+            
+            let (softirq_percent, system_cpu_percent) = if total_cpu_diff > 0 {
+                (
+                    (softirq_diff as f64 / total_cpu_diff as f64) * 100.0,
+                    (system_diff as f64 / total_cpu_diff as f64) * 100.0
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            
+            // Socket Pressure (Delta)
+            let pressure_diff = current_stats.socket_pressure.saturating_sub(last_stats.socket_pressure);
+            // Convert to a boolean-like percentage (if > 0 events per minute, show pressure)
+            // Or just normalization. For now, sending raw events might be confusing if UI expects %.
+            // Let's cap at 100 if > 0.
+            let pressure_val = if pressure_diff > 0 { 100.0 } else { 0.0 };
 
             // Legacy Metrics
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_packets_sent".to_string(), packets_sent_per_sec, tags.clone())).await?;
@@ -528,8 +638,16 @@ impl ProcCollector {
             
             // New Explicit Metrics for Debian/Non-eBPF support
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_connection_open_rate".to_string(), connection_open_rate, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_connection_close_rate".to_string(), connection_close_rate, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_latency_p50".to_string(), latency_p50, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_active_connections".to_string(), active_connections as f64, tags.clone())).await?;
+            
+            // New Comprehensive Metrics
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_retransmits".to_string(), retransmits_detected as f64, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_time_wait".to_string(), time_wait as f64, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "system".to_string(), "softirq_net_percent".to_string(), softirq_percent, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "system".to_string(), "cpu_system_percent".to_string(), system_cpu_percent, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "socket_queue_pressure".to_string(), pressure_val, tags.clone())).await?;
             
             // V2 Advanced Metric (Consolidated)
             // This metric contains all fields needed for network_metrics_ts
@@ -546,13 +664,13 @@ impl ProcCollector {
             v2_metric.latency_p50 = Some(latency_p50);
             v2_metric.latency_p90 = Some(latency_p50); // Approximate
             v2_metric.latency_p99 = Some(latency_p50); // Approximate
-            v2_metric.retransmits = Some(retransmits);
+            v2_metric.retransmits = Some(retransmits_detected);
             v2_metric.packet_drops = Some(total_drops);
             v2_metric.active_connections = Some(active_connections);
             v2_metric.established = Some(established);
             v2_metric.established = Some(established);
             v2_metric.open_rate = Some(connection_open_rate); 
-            v2_metric.close_rate = Some(0.0);
+            v2_metric.close_rate = Some(connection_close_rate);
             
             // Send V2 metric
             self.metrics_tx.send(v2_metric).await?;
@@ -650,6 +768,22 @@ impl ProcCollector {
         for line in tcp6_content.lines().skip(1) {
             parse_tcp_line(line, &mut flow_map);
         }
+        
+        // Calculate Close Wait & Established counts from flow map
+        let mut close_wait_count = 0u64;
+        let mut established_count = 0u64;
+        
+        for (_, (_, state)) in &flow_map {
+            if state == "CLOSE_WAIT" {
+                close_wait_count += 1;
+            } else if state == "ESTABLISHED" {
+                established_count += 1;
+            }
+        }
+        
+        // Send these specific metrics
+        self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_close_wait".to_string(), close_wait_count as f64, tags.clone())).await?;
+        self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_established".to_string(), established_count as f64, tags.clone())).await?;
         
         // Sort by connection count and take top 50
         let mut flows: Vec<_> = flow_map.into_iter().collect();
@@ -1027,6 +1161,12 @@ struct NetStats {
     tx_drops: u64,
     active_opens: u64,
     passive_opens: u64,
+    established: u64,
+    retransmits: u64,
+    softirq: u64,
+    system_cpu: u64,
+    socket_pressure: u64,
+    total_cpu: u64,
 }
 
 

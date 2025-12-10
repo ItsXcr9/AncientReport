@@ -6,9 +6,7 @@ version: "3.8"
 
 services:
   agent:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile
+    image: ghcr.io/itsxcr9/ancientreport/agent:latest
     container_name: AncientReport-agent
     network_mode: host
     pid: "host" # Required to see host processes, not container processes
