@@ -284,6 +284,10 @@ class HourlyAnalyzer:
         top_cpu_str = ", ".join([f"{p['name']} (PID {p['pid']}, {p['average']:.1f}%)" for p in top_processes.get('cpu', [])[:3]])
         top_memory_str = ", ".join([f"{p['name']} (PID {p['pid']}, {p['average']:.1f}MB)" for p in top_processes.get('memory', [])[:3]])
         top_disk_io_str = ", ".join([f"{p['name']} (PID {p['pid']}, {p['average']:.1f}MB)" for p in top_processes.get('disk_io', [])[:3]])
+        top_network_str = ", ".join([f"{p['name']} (PID {p['pid']}, {p['average']/1024:.1f}KB/s)" for p in top_processes.get('network', [])[:3]])
+        
+        # Format active flows
+        active_flows_str = ", ".join([f"{f['remote']} ({f['state']}, {f['count']} connections)" for f in top_processes.get('active_flows', [])[:5]])
         
         # Calculate actual comparisons vs baseline
         def calc_vs_baseline(current_val: float, baseline_dict: dict, metric_name: str) -> str:
@@ -325,6 +329,8 @@ class HourlyAnalyzer:
             "top_cpu_processes": top_cpu_str or "None",
             "top_memory_processes": top_memory_str or "None",
             "top_disk_io_processes": top_disk_io_str or "None",
+            "top_network_processes": top_network_str or "None",
+            "active_flows": active_flows_str or "None",
             "anomalies": anomalies,
             "config_issues": config_issues
         }
@@ -668,36 +674,24 @@ class HourlyAnalyzer:
         return pressure_points
     
     async def fetch_top_processes(self, start_time: datetime, end_time: datetime, hostname: str = None) -> Dict:
-        """Fetch top processes for CPU, memory, and disk I/O"""
+        """Fetch top processes for CPU, memory, disk I/O, and network"""
         try:
-            # Fetch process metrics from ClickHouse
-            cpu_processes = await self.ch.get_metrics_raw(start_time, end_time, "process_cpu_usage", limit=100)
-            memory_processes = await self.ch.get_metrics_raw(start_time, end_time, "process_memory_mb", limit=100)
-            disk_io_processes = await self.ch.get_metrics_raw(start_time, end_time, "process_disk_io_mb", limit=100)
-            
-            # Aggregate by process name and get averages
-            cpu_by_process: Dict[str, List[float]] = {}
-            memory_by_process: Dict[str, List[float]] = {}
-            disk_io_by_process: Dict[str, List[float]] = {}
-            
-            # Process CPU metrics
-            for row in cpu_processes:
-                # row format: (timestamp, value) - but we need to get tags
-                # Since get_metrics_raw doesn't return tags, we'll need to modify the query
-                # For now, let's use a different approach - query with tags
-                pass
-            
-            # For now, use a simpler aggregation approach
             # We'll query the metrics table directly with tags
             top_cpu = await self._get_top_processes_by_metric("process_cpu_usage", start_time, end_time, hostname)
             top_memory = await self._get_top_processes_by_metric("process_memory_mb", start_time, end_time, hostname)
             top_disk_io = await self._get_top_processes_by_metric("process_disk_io_mb", start_time, end_time, hostname)
+            # Network is a counter, so we need to calculate rate
+            top_network = await self._get_top_processes_by_metric("process_network_bandwidth", start_time, end_time, hostname, is_counter=True)
+            
+            # Fetch active flows summary
+            active_flows = await self.fetch_active_flows(start_time, end_time, hostname)
             
             return {
-                "cpu": top_cpu[:3],  # Top 3
+                "cpu": top_cpu[:3],
                 "memory": top_memory[:3],
                 "disk_io": top_disk_io[:3],
-                "network": []  # Network per-process is harder, skip for now
+                "network": top_network[:3],
+                "active_flows": active_flows
             }
         except Exception as e:
             logger.error(f"Failed to fetch top processes: {e}", exc_info=True)
@@ -705,10 +699,63 @@ class HourlyAnalyzer:
                 "cpu": [],
                 "memory": [],
                 "disk_io": [],
-                "network": []
+                "network": [],
+                "active_flows": []
             }
     
-    async def _get_top_processes_by_metric(self, metric_name: str, start_time: datetime, end_time: datetime, hostname: str = None) -> List[Dict]:
+    async def fetch_active_flows(self, start_time: datetime, end_time: datetime, hostname: str = None) -> List[Dict]:
+        """Fetch top active TCP flows"""
+        try:
+            # Convert to UTC for ClickHouse query
+            end_time_adjusted = end_time - timedelta(seconds=10)
+            start_ts = int(start_time.timestamp())
+            end_ts = int(end_time_adjusted.timestamp())
+            
+            # Query top flows by connection count
+            sql = f"""
+            SELECT 
+                tags['remote_ip'] as remote_ip,
+                tags['remote_port'] as remote_port,
+                tags['state'] as state,
+                max(value) as connection_count
+            FROM metrics
+            WHERE timestamp >= toDateTime({start_ts})
+              AND timestamp <= toDateTime({end_ts})
+              AND metric_name = 'tcp_flow'
+              {f"AND hostname = '{hostname}'" if hostname else ""}
+            GROUP BY remote_ip, remote_port, state
+            ORDER BY connection_count DESC
+            LIMIT 10
+            """
+            
+            result = await self.ch.query_df(sql)
+            flows = []
+            
+            if result and result.get('data'):
+                columns = result.get('columns', [])
+                col_map = {col: i for i, col in enumerate(columns)}
+                
+                for row in result['data']:
+                    try:
+                        remote_ip = row[col_map['remote_ip']]
+                        remote_port = row[col_map['remote_port']]
+                        state = row[col_map['state']]
+                        count = int(row[col_map['connection_count']])
+                        
+                        flows.append({
+                            "remote": f"{remote_ip}:{remote_port}",
+                            "state": state,
+                            "count": count
+                        })
+                    except Exception:
+                        continue
+            
+            return flows
+        except Exception as e:
+            logger.error(f"Failed to fetch active flows: {e}")
+            return []
+    
+    async def _get_top_processes_by_metric(self, metric_name: str, start_time: datetime, end_time: datetime, hostname: str = None, is_counter: bool = False) -> List[Dict]:
         """Get top processes for a specific metric - expects Tehran timezone, converts to UTC for query"""
         try:
             # Convert to UTC for ClickHouse query
@@ -722,13 +769,28 @@ class HourlyAnalyzer:
             # Query to get average value per process (using tags)
             # Use bracket notation for Map access (compatible with older ClickHouse versions)
             # Use argMax() to get the most recent command_line for each process (aggregate function)
+            
+            if is_counter:
+                # For counters (like network bytes), calculate rate: (max-min) / duration
+                # Use max-min as avg_value (total rate approx) or actual rate?
+                # Let's calculate avg_value as bytes/sec
+                value_calcs = """
+                (max(value) - min(value)) / greatest(1, dateDiff('second', min(timestamp), max(timestamp))) as avg_value,
+                (max(value) - min(value)) / greatest(1, dateDiff('second', min(timestamp), max(timestamp))) as max_value,
+                """
+            else:
+                # For gauges (CPU, memory), use average and max
+                value_calcs = """
+                avg(value) as avg_value,
+                max(value) as max_value,
+                """
+            
             sql = f"""
             SELECT 
                 tags['process_name'] as process_name,
                 tags['pid'] as pid,
                 argMax(if(has(tags, 'command_line'), tags['command_line'], ''), timestamp) as command_line,
-                avg(value) as avg_value,
-                max(value) as max_value,
+                {value_calcs}
                 count(*) as sample_count
             FROM metrics
             WHERE timestamp >= toDateTime({start_ts})
@@ -797,6 +859,7 @@ class HourlyAnalyzer:
                         if not process_name or process_name == "unknown" or process_name == "":
                             logger.debug(f"Skipping invalid process: name='{process_name}', pid='{pid}'")
                             continue
+                        
                         
                         logger.debug(f"Process: {process_name} (PID: {pid}), avg: {avg_value:.2f}, max: {max_value:.2f}, samples: {sample_count}")
                         

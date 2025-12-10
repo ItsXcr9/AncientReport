@@ -99,6 +99,10 @@ TOP PROCESSES:
 - Top CPU Consumers: {context.get('top_cpu_processes', 'None')}
 - Top Memory Consumers: {context.get('top_memory_processes', 'None')}
 - Top Disk I/O Consumers: {context.get('top_disk_io_processes', 'None')}
+- Top Network Consumers: {context.get('top_network_processes', 'None')}
+
+ACTIVE FLOWS (Top Remote Connections):
+{context.get('active_flows', 'None')}
 
 ANOMALIES DETECTED:
 {self._format_anomalies(context.get('anomalies', []))}
