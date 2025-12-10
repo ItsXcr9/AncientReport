@@ -309,13 +309,19 @@ impl DockerCollector {
             .output()?;
 
         if !health_status_output.status.success() {
+            let stderr = String::from_utf8_lossy(&health_status_output.stderr);
+            warn!("Failed to inspect health status for {}: {}", container_id, stderr);
             return Ok(("none".to_string(), String::new(), 0, String::new()));
         }
 
         let health_status = String::from_utf8_lossy(&health_status_output.stdout).trim().to_string();
         
+        // Debug log for health status
+        // debug!("Container {} health status raw: '{}'", container_id, health_status);
+        
         // If there's no healthcheck or status is empty/none, return early
         if health_status.is_empty() || health_status == "<no value>" || health_status == "none" {
+             // on some docker versions, it might be just empty string if no healthcheck
             return Ok(("none".to_string(), String::new(), 0, String::new()));
         }
 

@@ -1114,12 +1114,16 @@ async def get_metrics_from_clickhouse(
                 maxIf(value, metric_name = 'network_bytes_sent') as bytes_sent,
                 maxIf(value, metric_name = 'network_bytes_received') as bytes_recv,
                 maxIf(value, metric_name = 'network_packets_sent') as pkts_sent,
-                maxIf(value, metric_name = 'network_packets_received') as pkts_recv
+                maxIf(value, metric_name = 'network_packets_received') as pkts_recv,
+                maxIf(value, metric_name = 'network_connection_open_rate') as open_rate,
+                maxIf(value, metric_name = 'network_latency_p50') as latency,
+                maxIf(value, metric_name = 'network_active_connections') as active_opens
             FROM metrics
             WHERE {where_clause}
               AND timestamp >= now() - INTERVAL {minutes} MINUTE
               AND metric_name IN ('network_drops', 'network_bytes_sent', 'network_bytes_received', 
-                                  'network_packets_sent', 'network_packets_received')
+                                  'network_packets_sent', 'network_packets_received',
+                                  'network_connection_open_rate', 'network_latency_p50', 'network_active_connections')
             GROUP BY ts
             ORDER BY ts DESC
             LIMIT 720
@@ -1132,22 +1136,28 @@ async def get_metrics_from_clickhouse(
             bytes_recv = int(row[4] or 0)
             pkts_sent = int(row[5] or 0)
             pkts_recv = int(row[6] or 0)
+            open_rate = float(row[7] or 0)
+            latency = float(row[8] or 0)
+            active_opens = int(row[9] or 0)
             
-            # Estimate connections from packet counts
-            estimated_conns = max(1, (pkts_sent + pkts_recv) // 100) if (pkts_sent + pkts_recv) > 0 else 0
+            # Estimate connections if explicit metric missing
+            if active_opens > 0:
+                estimated_conns = active_opens
+            else:
+                estimated_conns = max(1, (pkts_sent + pkts_recv) // 100) if (pkts_sent + pkts_recv) > 0 else 0
             
             samples.append(MetricsSample(
                 timestamp=str(ts),
                 epoch=ts.timestamp() if hasattr(ts, 'timestamp') else 0,
                 hostname=row[1] or hostname,
-                latency_p50=0,  # Agent doesn't send latency
-                latency_p90=0,
-                latency_p99=0,
+                latency_p50=latency,
+                latency_p90=latency, # Approx
+                latency_p99=latency, # Approx
                 retransmits=0,
                 packet_drops=drops,
                 active_connections=estimated_conns,
                 established=estimated_conns,
-                open_rate=0,
+                open_rate=open_rate,
                 close_rate=0
             ))
         
@@ -1984,7 +1994,8 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
               AND timestamp >= now() - INTERVAL 10 MINUTE
               AND metric_name IN (
                 'network_drops', 'network_bytes_sent', 'network_bytes_received',
-                'network_packets_sent', 'network_packets_received'
+                'network_packets_sent', 'network_packets_received',
+                'network_connection_open_rate', 'network_latency_p50', 'network_active_connections'
               )
             GROUP BY metric_name
             """
@@ -2004,8 +2015,16 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                 pkts_sent = int(metrics_dict.get('network_packets_sent', 0))
                 pkts_recv = int(metrics_dict.get('network_packets_received', 0))
                 
-                # Estimate active connections from packets (rough estimate)
-                estimated_connections = max(1, (pkts_sent + pkts_recv) // 100)
+                # New explicit metrics (Debian/Non-eBPF support)
+                open_rate = float(metrics_dict.get('network_connection_open_rate', 0.0))
+                latency_p50 = float(metrics_dict.get('network_latency_p50', 0.0))
+                active_opens = int(metrics_dict.get('network_active_connections', 0))
+                
+                # Estimate active connections if explicit metric missing
+                if active_opens == 0:
+                     estimated_connections = max(1, (pkts_sent + pkts_recv) // 100)
+                else:
+                     estimated_connections = active_opens
                 
                 # Query tcp_flow metrics for top_flows
                 top_flows = []
@@ -2109,8 +2128,10 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                     timestamp=datetime.utcnow().isoformat(),
                     bandwidth=bandwidth_list,
                     latency=LatencyStats(
-                        p50=0, p90=0, p99=0, 
-                        min_ms=0, max_ms=0, samples=0
+                        p50=latency_p50, 
+                        p90=latency_p50,  # Approx
+                        p99=latency_p50,  # Approx
+                        min_ms=latency_p50, max_ms=latency_p50, samples=1
                     ),
                     connections=ConnectionStats(
                         active_connections=estimated_connections, 
@@ -2118,7 +2139,7 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                         listen=0, time_wait=0, close_wait=0, 
                         total_retransmits=0, 
                         packet_drops=drops,
-                        open_rate_per_sec=0,
+                        open_rate_per_sec=open_rate,
                         close_rate_per_sec=0
                     ),
                     top_flows=top_flows

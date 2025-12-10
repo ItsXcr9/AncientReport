@@ -24,6 +24,7 @@ import { StatCard } from './components/ui/StatCard';
 import { Badge } from './components/ui/Badge';
 import ServerSelector from './components/ServerSelector';
 import { ServerInfoCard } from './components/ServerInfoCard'
+import { NetworkMetricsPanel } from './components/NetworkMetricsPanel';
 
 interface SystemHealth {
   status: string
@@ -49,6 +50,7 @@ interface Report {
     memory: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
     disk_io: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
     network: Array<{ name: string; pid: string; average: number; peak: number; command_line?: string }>
+    active_flows?: Array<{ remote: string; state: string; count: number }>
   }
   ai_insights: {
     critical_alerts: string[]
@@ -183,11 +185,12 @@ function App() {
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
       const data = await res.json()
       if (data.report_id) {
-        if (!data.top_processes) data.top_processes = { cpu: [], memory: [], disk_io: [], network: [] }
+        if (!data.top_processes) data.top_processes = { cpu: [], memory: [], disk_io: [], network: [], active_flows: [] }
         if (!Array.isArray(data.top_processes.cpu)) data.top_processes.cpu = []
         if (!Array.isArray(data.top_processes.memory)) data.top_processes.memory = []
         if (!Array.isArray(data.top_processes.disk_io)) data.top_processes.disk_io = []
         if (!Array.isArray(data.top_processes.network)) data.top_processes.network = []
+        if (!Array.isArray(data.top_processes.active_flows)) data.top_processes.active_flows = []
         
         if (!data.ai_insights) data.ai_insights = { critical_alerts: [], recommendations: [], capacity_forecast: {}, config_optimizations: [] }
         if (!data.ai_insights.critical_alerts) data.ai_insights.critical_alerts = []
@@ -703,10 +706,12 @@ function App() {
                             </div>
                           </div>
                         )}
+
                         
                         {(!report.top_processes.cpu || !Array.isArray(report.top_processes.cpu) || report.top_processes.cpu.length === 0) && 
                          (!report.top_processes.memory || !Array.isArray(report.top_processes.memory) || report.top_processes.memory.length === 0) && 
-                         (!report.top_processes.disk_io || !Array.isArray(report.top_processes.disk_io) || report.top_processes.disk_io.length === 0) && (
+                         (!report.top_processes.disk_io || !Array.isArray(report.top_processes.disk_io) || report.top_processes.disk_io.length === 0) && 
+                         (!report.top_processes.network || !Array.isArray(report.top_processes.network) || report.top_processes.network.length === 0) && (
                           <div className="p-4 bg-white/5 rounded-lg border border-white/10 text-center text-gray-400 text-sm">
                             {report.top_processes ? 
                               'Top processes data exists but is empty. Process metrics may not be available for the selected time period.' :
@@ -721,6 +726,9 @@ function App() {
                         </div>
                       )}
                     </div>
+                    
+
+
 
                         {/* AI Recommendations */}
                         {(() => {
@@ -795,6 +803,11 @@ function App() {
                 )}
             </section>
           </div>
+
+        {/* Network Metrics Panel (Ported from MetalHive) - Phase 3 */}
+        <div className="mt-8 mb-8">
+          <NetworkMetricsPanel selectedNode={selectedServer} />
+        </div>
 
         {/* Docker Containers Section - Horizontal Layout */}
         <div className="mt-8 mb-8">

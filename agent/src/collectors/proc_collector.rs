@@ -503,6 +503,8 @@ impl ProcCollector {
             tx_packets: total_tx_packets,
             rx_drops: total_rx_drops,
             tx_drops: total_tx_drops,
+            active_opens,
+            passive_opens,
         };
 
         if let Some(ref last_stats) = self.last_net_stats {
@@ -512,12 +514,22 @@ impl ProcCollector {
             let bytes_sent_per_sec = ((current_stats.tx_bytes.saturating_sub(last_stats.tx_bytes)) as f64) / time_diff;
             let bytes_received_per_sec = ((current_stats.rx_bytes.saturating_sub(last_stats.rx_bytes)) as f64) / time_diff;
             
+            // Calculate connection rates (ActiveOpens + PassiveOpens)
+            let current_opens = current_stats.active_opens + current_stats.passive_opens;
+            let last_opens = last_stats.active_opens + last_stats.passive_opens;
+            let connection_open_rate = ((current_opens.saturating_sub(last_opens)) as f64) / time_diff;
+
             // Legacy Metrics
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_packets_sent".to_string(), packets_sent_per_sec, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_packets_received".to_string(), packets_received_per_sec, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_bytes_sent".to_string(), bytes_sent_per_sec, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_bytes_received".to_string(), bytes_received_per_sec, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_drops".to_string(), total_drops as f64, tags.clone())).await?;
+            
+            // New Explicit Metrics for Debian/Non-eBPF support
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_connection_open_rate".to_string(), connection_open_rate, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_latency_p50".to_string(), latency_p50, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_active_connections".to_string(), active_connections as f64, tags.clone())).await?;
             
             // V2 Advanced Metric (Consolidated)
             // This metric contains all fields needed for network_metrics_ts
@@ -538,8 +550,8 @@ impl ProcCollector {
             v2_metric.packet_drops = Some(total_drops);
             v2_metric.active_connections = Some(active_connections);
             v2_metric.established = Some(established);
-            // Rough rate estimation if we had history, but for now raw counts or 0
-            v2_metric.open_rate = Some(0.0); 
+            v2_metric.established = Some(established);
+            v2_metric.open_rate = Some(connection_open_rate); 
             v2_metric.close_rate = Some(0.0);
             
             // Send V2 metric
@@ -1013,6 +1025,8 @@ struct NetStats {
     tx_packets: u64,
     rx_drops: u64,
     tx_drops: u64,
+    active_opens: u64,
+    passive_opens: u64,
 }
 
 
