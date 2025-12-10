@@ -137,11 +137,16 @@ def build_inode_to_pid_map() -> dict:
     """Build a mapping of socket inodes to (pid, process_name)."""
     inode_map = {}
     proc_path = '/host/proc' if os.path.exists('/host/proc') else '/proc'
+    MAX_SOCKET_MAPPINGS = 500  # Limit sockets mapped (not total processes)
     
     try:
         for pid_entry in os.listdir(proc_path):
             if not pid_entry.isdigit():
                 continue
+            
+            # Stop if we've found enough socket mappings
+            if len(inode_map) >= MAX_SOCKET_MAPPINGS:
+                break
             
             pid = int(pid_entry)
             fd_path = f'{proc_path}/{pid}/fd'
@@ -184,7 +189,7 @@ def get_real_tcp_connections() -> List[TcpConnection]:
         try:
             with open(tcp_file, 'r') as f:
                 lines = f.readlines()[1:]  # Skip header
-                for line in lines[:100]:  # Limit to 100 connections
+                for line in lines[:500]:  # Limit to 500 connections for performance
                     parts = line.split()
                     if len(parts) < 10:
                         continue
@@ -244,6 +249,7 @@ def get_real_process_flows() -> List[ProcessFlow]:
     """Get per-process network flow statistics from /host/proc."""
     flows = []
     processes_with_network = {}
+    MAX_NETWORK_PROCESSES = 50  # Limit processes with network activity (not total scanned)
     
     # Read all processes and check which have network connections
     proc_path = '/host/proc' if os.path.exists('/host/proc') else '/proc'
@@ -253,6 +259,10 @@ def get_real_process_flows() -> List[ProcessFlow]:
         for pid_entry in os.listdir(proc_path):
             if not pid_entry.isdigit():
                 continue
+            
+            # Stop early if we found enough network-active processes
+            if len(processes_with_network) >= MAX_NETWORK_PROCESSES:
+                break
             
             pid = int(pid_entry)
             fd_path = f'{proc_path}/{pid}/fd'
@@ -932,7 +942,7 @@ async def ensure_network_metrics_tables():
     
     try:
         # Network metrics time series
-        await ch.command("""
+        await ch.query("""
             CREATE TABLE IF NOT EXISTS network_metrics_ts (
                 timestamp DateTime64(3),
                 hostname String,
@@ -956,7 +966,7 @@ async def ensure_network_metrics_tables():
         """)
         
         # Anomaly events table
-        await ch.command("""
+        await ch.query("""
             CREATE TABLE IF NOT EXISTS network_anomalies (
                 timestamp DateTime64(3),
                 hostname String,
@@ -1039,13 +1049,20 @@ async def get_metrics_from_clickhouse(
     hostname: Optional[str] = None,
     minutes: int = 10
 ) -> List[MetricsSample]:
-    """Get historical metrics from ClickHouse."""
+    """Get historical metrics from ClickHouse.
+    
+    First tries network_metrics_ts table (populated by local analysis service).
+    Falls back to metrics table (populated by remote agents) and aggregates.
+    """
     ch = get_clickhouse_client()
     if not ch:
         return []
     
+    samples = []
+    where_clause = f"hostname = '{hostname}'" if hostname else "1=1"
+    
+    # First try the network_metrics_ts table (populated by local analysis service)
     try:
-        where_clause = f"hostname = '{hostname}'" if hostname else "1=1"
         result = await ch.query(f"""
             SELECT 
                 timestamp,
@@ -1061,13 +1078,12 @@ async def get_metrics_from_clickhouse(
                 close_rate
             FROM network_metrics_ts
             WHERE {where_clause}
-              AND timestamp > now() - INTERVAL {minutes} MINUTE
+              AND timestamp >= now() - INTERVAL {minutes} MINUTE
             ORDER BY timestamp DESC
             LIMIT 720
         """)
         
-        samples = []
-        for row in result.result_rows:
+        for row in result:
             samples.append(MetricsSample(
                 timestamp=str(row[0]),
                 epoch=row[0].timestamp() if hasattr(row[0], 'timestamp') else 0,
@@ -1082,6 +1098,59 @@ async def get_metrics_from_clickhouse(
                 open_rate=row[9],
                 close_rate=row[10]
             ))
+        
+        if samples:
+            return samples
+    except Exception as e:
+        logger.debug(f"network_metrics_ts query failed: {e}")
+    
+    # Fallback: Query the metrics table (populated by remote agents) and aggregate
+    try:
+        result = await ch.query(f"""
+            SELECT 
+                toStartOfInterval(timestamp, INTERVAL 30 SECOND) as ts,
+                argMax(hostname, timestamp) as host,
+                maxIf(value, metric_name = 'network_drops') as drops,
+                maxIf(value, metric_name = 'network_bytes_sent') as bytes_sent,
+                maxIf(value, metric_name = 'network_bytes_received') as bytes_recv,
+                maxIf(value, metric_name = 'network_packets_sent') as pkts_sent,
+                maxIf(value, metric_name = 'network_packets_received') as pkts_recv
+            FROM metrics
+            WHERE {where_clause}
+              AND timestamp >= now() - INTERVAL {minutes} MINUTE
+              AND metric_name IN ('network_drops', 'network_bytes_sent', 'network_bytes_received', 
+                                  'network_packets_sent', 'network_packets_received')
+            GROUP BY ts
+            ORDER BY ts DESC
+            LIMIT 720
+        """)
+        
+        for row in result:
+            ts = row[0]
+            drops = int(row[2] or 0)
+            bytes_sent = int(row[3] or 0)
+            bytes_recv = int(row[4] or 0)
+            pkts_sent = int(row[5] or 0)
+            pkts_recv = int(row[6] or 0)
+            
+            # Estimate connections from packet counts
+            estimated_conns = max(1, (pkts_sent + pkts_recv) // 100) if (pkts_sent + pkts_recv) > 0 else 0
+            
+            samples.append(MetricsSample(
+                timestamp=str(ts),
+                epoch=ts.timestamp() if hasattr(ts, 'timestamp') else 0,
+                hostname=row[1] or hostname,
+                latency_p50=0,  # Agent doesn't send latency
+                latency_p90=0,
+                latency_p99=0,
+                retransmits=0,
+                packet_drops=drops,
+                active_connections=estimated_conns,
+                established=estimated_conns,
+                open_rate=0,
+                close_rate=0
+            ))
+        
         return samples
     except Exception as e:
         logger.warning(f"Failed to get metrics from ClickHouse: {e}")
@@ -1205,11 +1274,24 @@ def collect_metrics_sample() -> MetricsSample:
         active_connections=sum(conn_snapshot.values()),
         established=conn_snapshot['ESTABLISHED'],
         open_rate=open_rate,
-        close_rate=close_rate
+        close_rate=close_rate,
+        hostname=socket.gethostname()  # Add hostname for per-server tracking
     )
     
     with _history_lock:
         _metrics_history.append(sample)
+    
+    # Store to ClickHouse asynchronously (non-blocking)
+    # NOTE: Skipping get_system_context() to reduce CPU overhead
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(store_metrics_to_clickhouse(sample, None))
+        else:
+            asyncio.run(store_metrics_to_clickhouse(sample, None))
+    except Exception as e:
+        logger.debug(f"ClickHouse storage skipped: {e}")
     
     return sample
 
@@ -1888,19 +1970,188 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
     
     # For now, we only have local data. In future, query ClickHouse for specific hosts
     if hostname and hostname != current_hostname:
-        # Query from ClickHouse for other hosts (future implementation)
-        # For now return empty
-        return NetworkStatsResponse(
-            hostname=hostname,
-            timestamp=datetime.utcnow().isoformat(),
-            bandwidth=[],
-            latency=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
-            connections=ConnectionStats(
-                active_connections=0, established=0, listen=0,
-                time_wait=0, close_wait=0, total_retransmits=0, packet_drops=0
-            ),
-            top_flows=[]
-        )
+        # Query from ClickHouse for other hosts - use metrics table where agent stores data
+        try:
+            ch = get_clickhouse_client()
+            
+            # Fetch latest network metrics from the metrics table (where agent sends data)
+            query = f"""
+            SELECT 
+                metric_name,
+                argMax(value, timestamp) as value
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name IN (
+                'network_drops', 'network_bytes_sent', 'network_bytes_received',
+                'network_packets_sent', 'network_packets_received'
+              )
+            GROUP BY metric_name
+            """
+            result = await ch.query(query)
+            
+            # Parse results into a dict
+            metrics_dict = {}
+            if result:
+                for row in result:
+                    metrics_dict[row[0]] = float(row[1]) if row[1] else 0
+            
+            if metrics_dict:
+                # We have data from the agent
+                drops = int(metrics_dict.get('network_drops', 0))
+                bytes_sent = int(metrics_dict.get('network_bytes_sent', 0))
+                bytes_recv = int(metrics_dict.get('network_bytes_received', 0))
+                pkts_sent = int(metrics_dict.get('network_packets_sent', 0))
+                pkts_recv = int(metrics_dict.get('network_packets_received', 0))
+                
+                # Estimate active connections from packets (rough estimate)
+                estimated_connections = max(1, (pkts_sent + pkts_recv) // 100)
+                
+                # Query tcp_flow metrics for top_flows
+                top_flows = []
+                try:
+                    flow_query = f"""
+                    SELECT 
+                        tags['remote_ip'] as remote_ip,
+                        tags['remote_port'] as remote_port,
+                        tags['state'] as state,
+                        argMax(value, timestamp) as connections
+                    FROM metrics
+                    WHERE hostname = '{hostname}'
+                      AND timestamp >= now() - INTERVAL 10 MINUTE
+                      AND metric_name = 'tcp_flow'
+                    GROUP BY remote_ip, remote_port, state
+                    ORDER BY connections DESC
+                    LIMIT 20
+                    """
+                    flow_result = await ch.query(flow_query)
+                    logger.debug(f"tcp_flow query returned {len(flow_result) if flow_result else 0} rows")
+                    if flow_result:
+                        for row in flow_result:
+                            remote_ip = str(row[0]) if row[0] else 'unknown'
+                            # Port might be string like '4222' or IPv6 hex like '0000000000000000'
+                            port_str = str(row[1]) if row[1] else '0'
+                            try:
+                                remote_port = int(port_str)
+                            except ValueError:
+                                remote_port = 0  # Skip invalid ports
+                            state = str(row[2]) if row[2] else 'UNKNOWN'
+                            conn_count = int(row[3]) if row[3] else 1
+                            
+                            top_flows.append(FlowEdge(
+                                source_process="system",
+                                dest_ip=remote_ip,
+                                dest_port=remote_port,
+                                protocol="tcp",
+                                bytes_total=0,
+                                connection_count=conn_count,
+                                state=state
+                            ))
+                except Exception as e:
+                    logger.warning(f"Failed to query tcp_flow metrics: {e}")
+                
+                # Query process_network_bandwidth metrics for per-process bandwidth
+                bandwidth_list = []
+                try:
+                    bw_query = f"""
+                    SELECT 
+                        tags['process_name'] as process_name,
+                        toUInt32(tags['pid']) as pid,
+                        argMax(toUInt64(tags['bytes_sent']), timestamp) as bytes_sent,
+                        argMax(toUInt64(tags['bytes_received']), timestamp) as bytes_recv,
+                        argMax(value, timestamp) as total_bytes,
+                        argMax(toUInt32(tags['sockets']), timestamp) as sockets
+                    FROM metrics
+                    WHERE hostname = '{hostname}'
+                      AND timestamp >= now() - INTERVAL 10 MINUTE
+                      AND metric_name = 'process_network_bandwidth'
+                    GROUP BY process_name, pid
+                    ORDER BY total_bytes DESC
+                    LIMIT 20
+                    """
+                    bw_result = await ch.query(bw_query)
+                    logger.debug(f"process_network_bandwidth query returned {len(bw_result) if bw_result else 0} rows")
+                    if bw_result:
+                        for row in bw_result:
+                            proc_name = str(row[0]) if row[0] else 'unknown'
+                            proc_pid = int(row[1]) if row[1] else 0
+                            proc_sent = int(row[2]) if row[2] else 0
+                            proc_recv = int(row[3]) if row[3] else 0
+                            proc_total = int(row[4]) if row[4] else 0
+                            proc_sockets = int(row[5]) if row[5] else 0
+                            
+                            bandwidth_list.append(ProcessBandwidth(
+                                process_name=proc_name,
+                                pid=proc_pid,
+                                bytes_sent=proc_sent,
+                                bytes_received=proc_recv,
+                                total_bytes=proc_total,
+                                bytes_per_sec=0,
+                                flows=proc_sockets
+                            ))
+                except Exception as e:
+                    logger.warning(f"Failed to query process_network_bandwidth: {e}")
+                
+                # Fallback to system aggregate if no per-process data
+                if not bandwidth_list and (bytes_sent + bytes_recv) > 0:
+                    bandwidth_list = [ProcessBandwidth(
+                        process_name="system",
+                        pid=0,
+                        bytes_sent=bytes_sent,
+                        bytes_received=bytes_recv,
+                        total_bytes=bytes_sent + bytes_recv,
+                        bytes_per_sec=0,
+                        flows=1
+                    )]
+                
+                return NetworkStatsResponse(
+                    hostname=hostname,
+                    timestamp=datetime.utcnow().isoformat(),
+                    bandwidth=bandwidth_list,
+                    latency=LatencyStats(
+                        p50=0, p90=0, p99=0, 
+                        min_ms=0, max_ms=0, samples=0
+                    ),
+                    connections=ConnectionStats(
+                        active_connections=estimated_connections, 
+                        established=estimated_connections, 
+                        listen=0, time_wait=0, close_wait=0, 
+                        total_retransmits=0, 
+                        packet_drops=drops,
+                        open_rate_per_sec=0,
+                        close_rate_per_sec=0
+                    ),
+                    top_flows=top_flows
+                )
+            
+            # Fallback if no data found
+            logger.warning(f"No network data found for remote host {hostname} in last 10 mins")
+            return NetworkStatsResponse(
+                hostname=hostname,
+                timestamp=datetime.utcnow().isoformat(),
+                bandwidth=[],
+                latency=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
+                connections=ConnectionStats(
+                    active_connections=0, established=0, listen=0,
+                    time_wait=0, close_wait=0, total_retransmits=0, packet_drops=0
+                ),
+                top_flows=[]
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch remote stats for {hostname}: {e}")
+            # Fallback to empty on error
+            return NetworkStatsResponse(
+                hostname=hostname,
+                timestamp=datetime.utcnow().isoformat(),
+                bandwidth=[],
+                latency=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
+                connections=ConnectionStats(
+                    active_connections=0, established=0, listen=0,
+                    time_wait=0, close_wait=0, total_retransmits=0, packet_drops=0
+                ),
+                top_flows=[]
+            )
     
     return NetworkStatsResponse(
         hostname=current_hostname if hostname else None,
@@ -1952,9 +2203,15 @@ async def get_network_history(
     - Connection rates (open/close per second)
     - Packet drops and retransmits
     """
+    import socket # Added import for socket
     if hostname:
         # Query ClickHouse for historical data
         history = await get_metrics_from_clickhouse(hostname, minutes=samples * 5 // 60 + 1)
+        
+        # If ClickHouse has no data yet, and we are querying the local server, return local history
+        if not history and hostname == socket.gethostname():
+            history = get_metrics_history(samples)
+            
         return TimeSeriesResponse(
             samples=history[:samples],
             sample_count=len(history),
@@ -1967,9 +2224,9 @@ async def get_network_history(
     history = get_metrics_history(samples)
     
     return TimeSeriesResponse(
-        samples=history,
+        samples=history[:samples],
         sample_count=len(history),
-        oldest_timestamp=history[0].timestamp if history else None,
+        oldest_timestamp=history[0].timestamp if history else None, # Local history is oldest -> newest
         newest_timestamp=history[-1].timestamp if history else None
     )
 
@@ -2022,8 +2279,21 @@ async def get_network_trends(
     Compares current 5-minute averages vs 1-hour baseline.
     Returns delta percentages and severity indicators.
     """
-    # TODO: If hostname is specified, query ClickHouse for that server's data
-    # For now, always return local trends
+    # If hostname is specified, we should ideally query ClickHouse
+    # For now, if hostname matches local, return local trends to prevent "Stuck" UI
+    import socket
+    if hostname and hostname != socket.gethostname():
+        # TODO: Implement full ClickHouse-based trend calculation for remote hosts
+        # This requires fetching 1 hour of history and running calculate_trend logic
+        # For now return empty valid structure to avoid UI errors/stuck state
+        return TrendsResponse(
+            latency_p99=TrendComparison(metric='latency_p99', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+            latency_p50=TrendComparison(metric='latency_p50', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+            retransmits=TrendComparison(metric='retransmits', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+            packet_drops=TrendComparison(metric='packet_drops', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+            connections=TrendComparison(metric='connections', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal')
+        )
+        
     return get_trends()
 
 
@@ -2047,10 +2317,27 @@ async def get_network_anomalies(
     if hostname:
         # Query ClickHouse for historical anomalies
         historical = await get_anomalies_from_clickhouse(hostname, hours=24)
+        
+        # If ClickHouse has no data yet, and we are querying the local server, return local anomalies
+        if not historical and hostname == socket.gethostname():
+             current = detect_anomalies()
+             historical = get_recent_anomalies(20)
+             # Combine current and historical unique
+             seen = set()
+             combined = []
+             for a in current + historical:
+                 key = (a.timestamp, a.event_type, a.description)
+                 if key not in seen:
+                     seen.add(key)
+                     combined.append(a)
+             return AnomaliesResponse(
+                 anomalies=combined[:20],
+                 count=len(combined)
+             )
+             
         return AnomaliesResponse(
             anomalies=historical[:20],
             count=len(historical),
-            last_check=datetime.utcnow().isoformat()
         )
     
     # Local detection
@@ -2072,9 +2359,15 @@ async def get_network_anomalies(
 
 
 @router.get("/process/{pid}/drilldown", response_model=ProcessDrilldown)
-async def get_process_drilldown_endpoint(pid: int) -> ProcessDrilldown:
+async def get_process_drilldown_endpoint(
+    pid: int,
+    hostname: Optional[str] = Query(None, description="Filter by hostname for per-server data")
+) -> ProcessDrilldown:
     """
     Get detailed drilldown data for a specific process.
+    
+    - hostname=None: Query local /proc for process data
+    - hostname=<server>: Query ClickHouse for agent-collected data
     
     Returns:
     - Process health snapshot (CPU, memory, FDs, sockets)
@@ -2083,8 +2376,157 @@ async def get_process_drilldown_endpoint(pid: int) -> ProcessDrilldown:
     - Syscall breakdown (read/write/poll/epoll)
     - Recent anomalies for this process
     """
-    drilldown = get_process_drilldown(pid)
-    if not drilldown:
+    import socket
+    current_hostname = socket.gethostname()
+    
+    # For local or same hostname, use /proc directly
+    if not hostname or hostname == current_hostname:
+        drilldown = get_process_drilldown(pid)
+        if not drilldown:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Process {pid} not found")
+        return drilldown
+    
+    # For remote hosts, query ClickHouse for agent metrics
+    try:
+        ch = get_clickhouse_client()
+        
+        # Get process info from process_cpu_usage or process_memory_mb metrics
+        query = f"""
+        SELECT 
+            tags['process_name'] as process_name,
+            tags['pid'] as pid,
+            tags['command_line'] as cmd_line,
+            argMax(value, timestamp) as cpu_usage
+        FROM metrics
+        WHERE hostname = '{hostname}'
+          AND timestamp >= now() - INTERVAL 10 MINUTE
+          AND metric_name = 'process_cpu_usage'
+          AND tags['pid'] = '{pid}'
+        GROUP BY process_name, pid, cmd_line
+        LIMIT 1
+        """
+        result = await ch.query(query)
+        result_list = list(result) if result else []
+        logger.debug(f"CPU query returned {len(result_list)} rows for {hostname}:{pid}")
+        
+        if len(result_list) == 0:
+            # Try by process_network_bandwidth
+            query2 = f"""
+            SELECT 
+                tags['process_name'] as process_name,
+                tags['pid'] as pid,
+                argMax(value, timestamp) as total_bytes,
+                argMax(toUInt64(tags['bytes_sent']), timestamp) as bytes_sent,
+                argMax(toUInt64(tags['bytes_received']), timestamp) as bytes_recv,
+                argMax(toUInt32(tags['sockets']), timestamp) as sockets
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'process_network_bandwidth'
+              AND tags['pid'] = '{pid}'
+            GROUP BY process_name, pid
+            LIMIT 1
+            """
+            result2 = await ch.query(query2)
+            result_list = list(result2) if result2 else []
+            logger.debug(f"Bandwidth query returned {len(result_list)} rows for {hostname}:{pid}")
+            
+            if len(result_list) == 0:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail=f"Process {pid} not found on {hostname}")
+            
+            row = result_list[0]
+            process_name = str(row[0]) if row[0] else 'unknown'
+            bytes_sent = int(row[3]) if row[3] else 0
+            bytes_recv = int(row[4]) if row[4] else 0
+            sockets = int(row[5]) if row[5] else 0
+            
+            # Build basic drilldown from network data
+            health = ProcessHealth(
+                process_name=process_name,
+                pid=pid,
+                cpu_percent=0.0,
+                memory_mb=0.0,
+                memory_percent=0.0,
+                open_fds=0,
+                threads=1,
+                socket_count=sockets
+            )
+            
+            return ProcessDrilldown(
+                health=health,
+                flows=[],
+                rtt_histogram=[],
+                rtt_stats=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
+                syscalls=SyscallBreakdown(),
+                recent_anomalies=[],
+                total_bytes_sent=bytes_sent,
+                total_bytes_received=bytes_recv,
+                connection_count=sockets
+            )
+        
+        row = result_list[0]
+        process_name = str(row[0]) if row[0] else 'unknown'
+        cpu_usage = float(row[3]) if row[3] else 0.0
+        cmd_line = str(row[2]) if row[2] else ''
+        
+        # Get memory usage
+        mem_query = f"""
+        SELECT argMax(value, timestamp) as memory_mb
+        FROM metrics
+        WHERE hostname = '{hostname}'
+          AND timestamp >= now() - INTERVAL 10 MINUTE
+          AND metric_name = 'process_memory_mb'
+          AND tags['pid'] = '{pid}'
+        """
+        mem_result = await ch.query(mem_query)
+        mem_list = list(mem_result) if mem_result else []
+        memory_mb = float(mem_list[0][0]) if mem_list and mem_list[0][0] else 0.0
+        
+        # Get network info if available
+        net_query = f"""
+        SELECT 
+            argMax(toUInt64(tags['bytes_sent']), timestamp) as bytes_sent,
+            argMax(toUInt64(tags['bytes_received']), timestamp) as bytes_recv,
+            argMax(toUInt32(tags['sockets']), timestamp) as sockets
+        FROM metrics
+        WHERE hostname = '{hostname}'
+          AND timestamp >= now() - INTERVAL 10 MINUTE
+          AND metric_name = 'process_network_bandwidth'
+          AND tags['pid'] = '{pid}'
+        """
+        net_result = await ch.query(net_query)
+        net_list = list(net_result) if net_result else []
+        bytes_sent = int(net_list[0][0]) if net_list and net_list[0][0] else 0
+        bytes_recv = int(net_list[0][1]) if net_list and len(net_list[0]) > 1 and net_list[0][1] else 0
+        sockets = int(net_list[0][2]) if net_list and len(net_list[0]) > 2 and net_list[0][2] else 0
+        
+        health = ProcessHealth(
+            process_name=process_name,
+            pid=pid,
+            cpu_percent=cpu_usage,
+            memory_mb=memory_mb,
+            memory_percent=0.0,
+            open_fds=0,
+            threads=1,
+            socket_count=sockets
+        )
+        
+        return ProcessDrilldown(
+            health=health,
+            flows=[],
+            rtt_histogram=[],
+            rtt_stats=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
+            syscalls=SyscallBreakdown(),
+            recent_anomalies=[],
+            total_bytes_sent=bytes_sent,
+            total_bytes_received=bytes_recv,
+            connection_count=sockets
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get process drilldown for {hostname}:{pid}: {e}")
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"Process {pid} not found")
-    return drilldown
+        raise HTTPException(status_code=404, detail=f"Process {pid} not found on {hostname}")
+

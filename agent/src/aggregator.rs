@@ -14,6 +14,72 @@ pub struct Metric {
     pub metric_name: String,
     pub value: f64,
     pub tags: HashMap<String, String>,
+    
+    // Optional V2 Network fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_p50: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_p90: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_p99: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retransmits: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packet_drops: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_connections: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub established: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close_rate: Option<f64>,
+    
+    // Optional V2 Anomaly fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f64>,
+}
+
+impl Metric {
+    pub fn new_basic(
+        timestamp: i64,
+        hostname: String,
+        metric_type: String,
+        metric_name: String,
+        value: f64,
+        tags: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            timestamp,
+            hostname,
+            metric_type,
+            metric_name,
+            value,
+            tags,
+            latency_p50: None,
+            latency_p90: None,
+            latency_p99: None,
+            retransmits: None,
+            packet_drops: None,
+            active_connections: None,
+            established: None,
+            open_rate: None,
+            close_rate: None,
+            event_type: None,
+            severity: None,
+            description: None,
+            process: None,
+            threshold: None,
+        }
+    }
 }
 
 

@@ -137,12 +137,10 @@ class IngestionGateway:
                                     
                                     # Handle nested list format (agent bug workaround)
                                     if isinstance(metric, list) and len(metric) > 0:
-                                        logger.debug(f"  ⚠️ Unwrapping nested list at item {i}")
                                         metric = metric[0]  # Unwrap the nested list
                                     
                                     if isinstance(metric, dict):
                                         hostname = metric.get('hostname')
-                                        logger.debug(f"  Item {i}: hostname={hostname}, has_hostname={bool(hostname)}")
                                         if hostname:
                                             self.batch_buffer.append(metric)
                                             added_count += 1
@@ -223,91 +221,118 @@ class IngestionGateway:
                 logger.info(f"Batch of {count} items - Sample: hostname={sample.get('hostname')}, metric={sample.get('metric_name')}, ts={sample.get('timestamp')}")
             
             # Convert to ClickHouse format
-            rows = []
+            # Separate metrics by destination table
+            generic_metrics_rows = []
+            network_metrics_rows = []
+            anomaly_rows = []
+            
             for metric in self.batch_buffer:
                 try:
                     # Handle both dict and object-like structures
                     if not isinstance(metric, dict):
-                        # Skip non-dict metrics
                         logger.warning(f"Skipping non-dict metric: {type(metric)}")
                         continue
                     
-                    # Parse timestamp - handle multiple formats
-                    ts = metric.get('timestamp')
-                    
-                    # Skip metrics without hostname or timestamp (invalid data)
+                    # Parse timestamp
+                    ts_val = metric.get('timestamp')
                     hostname_val = metric.get('hostname')
+                    
+                    # Validation
                     if not hostname_val or hostname_val == 'unknown':
-                        logger.debug(f"Skipping metric without valid hostname")
                         continue
-                    
-                    # Handle None/missing timestamp
-                    if ts is None:
-                        logger.warning(f"Metric missing timestamp, using current time: {metric.get('metric_name', 'unknown')} from {hostname_val}")
-                        timestamp = datetime.utcnow()
-                    elif isinstance(ts, str):
-                        # Try to parse ISO format or other common formats
-                        try:
-                            timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                        except:
-                            # Try common timestamp formats
+                        
+                    # Normalize timestamp to datetime object
+                    timestamp = datetime.utcnow()
+                    if ts_val:
+                        if isinstance(ts_val, str):
                             try:
-                                timestamp = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                                timestamp = datetime.fromisoformat(ts_val.replace('Z', '+00:00'))
                             except:
-                                logger.warning(f"Could not parse timestamp string: {ts}, using current time")
-                                timestamp = datetime.utcnow()
-                    elif isinstance(ts, (int, float)):
-                        # Unix timestamp (seconds since epoch) - agent sends this
-                        try:
-                            # Unix timestamps are always UTC
-                            timestamp = datetime.fromtimestamp(ts, tz=None)  # Creates naive datetime in UTC
-                            logger.debug(f"Converted Unix timestamp {ts} to {timestamp}")
-                        except (ValueError, OSError) as e:
-                            logger.warning(f"Invalid unix timestamp {ts}: {e}, using current time")
-                            timestamp = datetime.utcnow()
-                    elif isinstance(ts, datetime):
-                        timestamp = ts
+                                try:
+                                    timestamp = datetime.strptime(ts_val, '%Y-%m-%d %H:%M:%S')
+                                except:
+                                    pass
+                        elif isinstance(ts_val, (int, float)):
+                            try:
+                                timestamp = datetime.fromtimestamp(ts_val)
+                            except:
+                                pass
+                    
+                    # 1. Check if this is a Network Metric Sample (has latency_p50)
+                    if 'latency_p50' in metric:
+                        row = (
+                            timestamp,
+                            str(hostname_val),
+                            float(metric.get('latency_p50', 0)),
+                            float(metric.get('latency_p90', 0)),
+                            float(metric.get('latency_p99', 0)),
+                            int(metric.get('retransmits', 0)),
+                            int(metric.get('packet_drops', 0)),
+                            int(metric.get('active_connections', 0)),
+                            int(metric.get('established', 0)),
+                            float(metric.get('open_rate', 0)),
+                            float(metric.get('close_rate', 0)),
+                            float(metric.get('memory_used_percent', 0)),
+                            float(metric.get('cpu_system_percent', 0)),
+                            float(metric.get('softirq_net_percent', 0)),
+                            float(metric.get('socket_queue_pressure', 0)),
+                            int(1 if metric.get('oom_risk') else 0)
+                        )
+                        network_metrics_rows.append(row)
+                        
+                    # 2. Check if this is an Anomaly Event (has event_type)
+                    elif 'event_type' in metric and 'severity' in metric:
+                        row = (
+                            timestamp,
+                            str(hostname_val),
+                            str(metric.get('event_type')),
+                            str(metric.get('severity')),
+                            metric.get('process'), # Nullable
+                            str(metric.get('description', '')),
+                            float(metric.get('value', 0)),
+                            float(metric.get('threshold', 0))
+                        )
+                        anomaly_rows.append(row)
+                        
+                    # 3. Default to Generic Metric
                     else:
-                        logger.warning(f"Unknown timestamp type {type(ts)}, using current time")
-                        timestamp = datetime.utcnow()
-                    
-                    # Build row tuple for ClickHouse (must match table schema)
-                    # tags column is Map(String, String) so it needs a dict with string keys/values
-                    tags_value = metric.get('tags', {})
-                    if isinstance(tags_value, dict):
-                        # Ensure all values are strings (ClickHouse Map requires string values)
-                        tags_dict = {str(k): str(v) for k, v in tags_value.items()}
-                    else:
-                        tags_dict = {}
-                    
-                    row = (
-                        timestamp,  # timestamp (DateTime) - stored as UTC in ClickHouse
-                        str(hostname_val),  # hostname (String)
-                        str(metric.get('metric_type', 'system')),  # metric_type (String)
-                        str(metric.get('metric_name', 'unknown')),  # metric_name (String)
-                        float(metric.get('value', 0)),  # value (Float64)
-                        tags_dict  # tags (Map(String, String))
-                    )
-                    
-                    rows.append(row)
+                        tags_value = metric.get('tags', {})
+                        tags_dict = {str(k): str(v) for k, v in tags_value.items()} if isinstance(tags_value, dict) else {}
+                        
+                        row = (
+                            timestamp,
+                            str(hostname_val),
+                            str(metric.get('metric_type', 'system')),
+                            str(metric.get('metric_name', 'unknown')),
+                            float(metric.get('value', 0)),
+                            tags_dict
+                        )
+                        generic_metrics_rows.append(row)
+                        
                 except Exception as e:
                     logger.error(f"Error converting metric: {e}, metric: {metric}")
                     continue
             
-            if rows:
-                # Batch insert to ClickHouse
-                logger.info(f"Inserting {len(rows)} rows to ClickHouse...")
-                await self.clickhouse.insert('metrics', rows)
-                logger.info(f"✅ Successfully flushed {len(rows)} metrics to ClickHouse (from {count} buffered items)")
-            else:
-                logger.warning(f"⚠️ No valid metrics to flush from {count} items")
+            # Batch insert to ClickHouse tables
+            if generic_metrics_rows:
+                logger.info(f"Inserting {len(generic_metrics_rows)} rows to 'metrics' table...")
+                await self.clickhouse.insert('metrics', generic_metrics_rows)
+                
+            if network_metrics_rows:
+                logger.info(f"Inserting {len(network_metrics_rows)} rows to 'network_metrics_ts' table...")
+                await self.clickhouse.insert('network_metrics_ts', network_metrics_rows)
+                
+            if anomaly_rows:
+                logger.info(f"Inserting {len(anomaly_rows)} rows to 'network_anomalies' table...")
+                await self.clickhouse.insert('network_anomalies', anomaly_rows)
+                
+            logger.info(f"✅ Flushed batch: {len(generic_metrics_rows)} generic, {len(network_metrics_rows)} network, {len(anomaly_rows)} anomalies")
             
             # Clear buffer
             self.batch_buffer.clear()
             
         except Exception as e:
             logger.error(f"Failed to flush batch: {e}", exc_info=True)
-            # Clear buffer anyway to avoid infinite retry of bad data
             self.batch_buffer.clear()
     
     async def close(self):

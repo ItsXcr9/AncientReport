@@ -158,18 +158,18 @@ impl CustomMonitorManager {
     }
 
     async fn send_result(&self, result: &MonitorResult) -> Result<()> {
-        let metric = Metric {
-            timestamp: result.timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "custom_monitor".to_string(),
-            metric_name: format!("monitor_{}", result.monitor_name),
-            value: match result.status {
+        let metric = Metric::new_basic(
+            result.timestamp,
+            self.hostname.clone(),
+            "custom_monitor".to_string(),
+            format!("monitor_{}", result.monitor_name),
+            match result.status {
                 super::types::MonitorStatus::Ok => 1.0,
                 super::types::MonitorStatus::Warning => 0.5,
                 super::types::MonitorStatus::Critical => 0.0,
                 super::types::MonitorStatus::Unknown => -1.0,
             },
-            tags: {
+            {
                 let mut tags = std::collections::HashMap::new();
                 tags.insert("monitor_id".to_string(), result.monitor_id.clone());
                 tags.insert("status".to_string(), result.status.to_string());
@@ -179,7 +179,7 @@ impl CustomMonitorManager {
                 }
                 tags
             },
-        };
+        );
 
         self.metrics_tx.send(metric).await?;
         Ok(())

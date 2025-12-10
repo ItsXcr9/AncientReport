@@ -286,6 +286,9 @@ async def startup_event():
     healthchecks.set_clickhouse_client(clickhouse_client)
     ebpf_api.set_clickhouse_client(clickhouse_client)
     
+    # Initialize ClickHouse tables for network metrics
+    await ebpf_api.ensure_network_metrics_tables()
+    
     # Initialize AI engine
     ai_provider = os.getenv("AI_PROVIDER", "google")
     ai_model = os.getenv("AI_MODEL", "gemini-2.5-flash-lite")
@@ -351,16 +354,16 @@ async def startup_event():
     )
     logger.info(f"✓ Scheduled data cleanup (daily at 3:00 AM, retention: {DATA_RETENTION_DAYS} days)")
     
-    # Schedule network metrics collection (every 5 seconds for time-series charts)
+    # Schedule network metrics collection (every 30 seconds to reduce CPU load)
     scheduler.add_job(
         ebpf_api.collect_metrics_sample,
         'interval',
-        seconds=5,
+        seconds=30,
         id='network_metrics_collection',
         name='Network Metrics Collection',
         replace_existing=True
     )
-    logger.info("✓ Scheduled network metrics collection (every 5 seconds)")
+    logger.info("✓ Scheduled network metrics collection (every 30 seconds)")
     
     scheduler.start()
     logger.info("✓ Scheduler started")

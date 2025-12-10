@@ -5,6 +5,7 @@ use tokio::time::{interval, Duration};
 use tokio::fs;
 use tracing::info;
 use std::collections::HashMap;
+use std::process::Command;
 
 use crate::aggregator::Metric;
 
@@ -85,23 +86,23 @@ impl ProcCollector {
         let cpu_count = self.system.cpus().len();
         info!("CPU usage: {:.2}% ({} cores)", cpu_usage, cpu_count);
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "cpu_usage_percent".to_string(),
-            value: cpu_usage as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "cpu_usage_percent".to_string(),
+            cpu_usage as f64,
+            tags.clone(),
+        )).await?;
 
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "cpu_cores".to_string(),
-            value: cpu_count as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "cpu_cores".to_string(),
+            cpu_count as f64,
+            tags.clone(),
+        )).await?;
 
         // Collect memory metrics
         let total_memory = self.system.total_memory();
@@ -113,32 +114,32 @@ impl ProcCollector {
             total_memory / 1024 / 1024
         );
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "memory_usage_percent".to_string(),
-            value: memory_percent,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "memory_usage_percent".to_string(),
+            memory_percent,
+            tags.clone(),
+        )).await?;
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "memory_used_mb".to_string(),
-            value: (used_memory / 1024 / 1024) as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "memory_used_mb".to_string(),
+            (used_memory / 1024 / 1024) as f64,
+            tags.clone(),
+        )).await?;
 
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "memory_total_mb".to_string(),
-            value: (total_memory / 1024 / 1024) as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "memory_total_mb".to_string(),
+            (total_memory / 1024 / 1024) as f64,
+            tags.clone(),
+        )).await?;
 
         // Collect load average
         let load_avg = System::load_average();
@@ -146,45 +147,45 @@ impl ProcCollector {
             load_avg.one, load_avg.five, load_avg.fifteen
         );
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "load_avg_1min".to_string(),
-            value: load_avg.one,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "load_avg_1min".to_string(),
+            load_avg.one,
+            tags.clone(),
+        )).await?;
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "load_avg_5min".to_string(),
-            value: load_avg.five,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "load_avg_5min".to_string(),
+            load_avg.five,
+            tags.clone(),
+        )).await?;
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "load_avg_15min".to_string(),
-            value: load_avg.fifteen,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "load_avg_15min".to_string(),
+            load_avg.fifteen,
+            tags.clone(),
+        )).await?;
 
         // Collect process count
         let process_count = self.system.processes().len();
         info!("Process count: {}", process_count);
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "process_count".to_string(),
-            value: process_count as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "process_count".to_string(),
+            process_count as f64,
+            tags.clone(),
+        )).await?;
 
         // Collect disk space metrics
         let disks = Disks::new_with_refreshed_list();
@@ -235,32 +236,32 @@ impl ProcCollector {
             total_space / 1024 / 1024 / 1024
         );
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "disk_total_gb".to_string(),
-            value: (total_space / 1024 / 1024 / 1024) as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "disk_total_gb".to_string(),
+            (total_space / 1024 / 1024 / 1024) as f64,
+            tags.clone(),
+        )).await?;
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "disk_used_gb".to_string(),
-            value: (used_space / 1024 / 1024 / 1024) as f64,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "disk_used_gb".to_string(),
+            (used_space / 1024 / 1024 / 1024) as f64,
+            tags.clone(),
+        )).await?;
         
-        self.metrics_tx.send(Metric {
+        self.metrics_tx.send(Metric::new_basic(
             timestamp,
-            hostname: self.hostname.clone(),
-            metric_type: "system".to_string(),
-            metric_name: "disk_usage_percent".to_string(),
-            value: disk_usage_percent,
-            tags: tags.clone(),
-        }).await?;
+            self.hostname.clone(),
+            "system".to_string(),
+            "disk_usage_percent".to_string(),
+            disk_usage_percent,
+            tags.clone(),
+        )).await?;
 
         // Collect disk I/O metrics
         if let Err(e) = self.collect_disk_io(timestamp, &tags).await {
@@ -270,6 +271,16 @@ impl ProcCollector {
         // Collect network metrics
         if let Err(e) = self.collect_network(timestamp, &tags).await {
             tracing::warn!("Failed to collect network metrics: {}", e);
+        }
+
+        // Collect TCP flows for Active Flows feature
+        if let Err(e) = self.collect_tcp_flows(timestamp, &tags).await {
+            tracing::warn!("Failed to collect TCP flows: {}", e);
+        }
+
+        // Collect per-process network bandwidth
+        if let Err(e) = self.collect_process_bandwidth(timestamp, &tags).await {
+            tracing::warn!("Failed to collect process bandwidth: {}", e);
         }
 
         // Collect top processes (CPU, Memory, Disk I/O, Network)
@@ -356,32 +367,32 @@ impl ProcCollector {
                 0.0
             };
 
-            self.metrics_tx.send(Metric {
+            self.metrics_tx.send(Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "disk".to_string(),
-                metric_name: "disk_reads_per_sec".to_string(),
-                value: reads_per_sec,
-                tags: tags.clone(),
-            }).await?;
+                self.hostname.clone(),
+                "disk".to_string(),
+                "disk_reads_per_sec".to_string(),
+                reads_per_sec,
+                tags.clone(),
+            )).await?;
 
-            self.metrics_tx.send(Metric {
+            self.metrics_tx.send(Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "disk".to_string(),
-                metric_name: "disk_writes_per_sec".to_string(),
-                value: writes_per_sec,
-                tags: tags.clone(),
-            }).await?;
+                self.hostname.clone(),
+                "disk".to_string(),
+                "disk_writes_per_sec".to_string(),
+                writes_per_sec,
+                tags.clone(),
+            )).await?;
 
-            self.metrics_tx.send(Metric {
+            self.metrics_tx.send(Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "disk".to_string(),
-                metric_name: "disk_latency_ms".to_string(),
-                value: latency_ms,
-                tags: tags.clone(),
-            }).await?;
+                self.hostname.clone(),
+                "disk".to_string(),
+                "disk_latency_ms".to_string(),
+                latency_ms,
+                tags.clone(),
+            )).await?;
         }
 
         self.last_disk_stats = Some(current_stats);
@@ -389,7 +400,7 @@ impl ProcCollector {
     }
 
     async fn collect_network(&mut self, timestamp: i64, tags: &HashMap<String, String>) -> Result<()> {
-        // Read /proc/net/dev
+        // 1. Read /proc/net/dev (Bandwidth & Drops)
         let netdev_content = match fs::read_to_string("/proc/net/dev").await {
             Ok(content) => content,
             Err(_) => fs::read_to_string("/host/proc/net/dev").await?,
@@ -403,10 +414,8 @@ impl ProcCollector {
         let mut total_tx_drops: u64 = 0;
 
         for line in netdev_content.lines().skip(2) {
-            // Skip header lines
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 10 {
-                // Format: interface rx_bytes rx_packets rx_errs rx_drop rx_fifo rx_frame rx_compressed rx_multicast tx_bytes tx_packets ...
                 if let (Ok(rx_bytes), Ok(rx_packets), Ok(rx_drops), Ok(tx_bytes), Ok(tx_packets), Ok(tx_drops)) = (
                     parts[1].parse::<u64>(),
                     parts[2].parse::<u64>(),
@@ -415,7 +424,6 @@ impl ProcCollector {
                     parts[10].parse::<u64>(),
                     parts[12].parse::<u64>(),
                 ) {
-                    // Skip loopback
                     if !parts[0].trim_end_matches(':').starts_with("lo") {
                         total_rx_bytes += rx_bytes;
                         total_rx_packets += rx_packets;
@@ -427,7 +435,67 @@ impl ProcCollector {
                 }
             }
         }
+        
+        let total_drops = total_rx_drops + total_tx_drops;
 
+        // 2. Read /proc/net/snmp (Retransmits & States)
+        let snmp_content = match fs::read_to_string("/proc/net/snmp").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/host/proc/net/snmp").await.unwrap_or_default(),
+        };
+        
+        let mut retransmits = 0u64;
+        let mut established = 0u64;
+        let mut active_opens = 0u64;
+        let mut passive_opens = 0u64;
+        
+        for line in snmp_content.lines() {
+            if line.starts_with("Tcp: ") && !line.contains("RtoAlgorithm") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() > 12 {
+                    // Indexes (1-based in RFC 1213, 0-based here after 'Tcp:'): 
+                    // 5: ActiveOpens, 6: PassiveOpens, 9: CurrEstab, 12: RetransSegs
+                    active_opens = parts[5].parse().unwrap_or(0);
+                    passive_opens = parts[6].parse().unwrap_or(0);
+                    established = parts[9].parse().unwrap_or(0);
+                    retransmits = parts[12].parse().unwrap_or(0);
+                }
+            }
+        }
+        
+        // 3. Get Latency via ss -ti (approx p50)
+        // Note: Running command might be slow, so simple implementation
+        let mut latency_p50: f64 = 0.0;
+        let mut active_connections: u64 = 0;
+        if let Ok(output) = Command::new("ss").args(&["-ti"]).output() {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                let mut total_rtt = 0.0;
+                let mut count = 0;
+                
+                for line in output_str.lines() {
+                    active_connections += 1;
+                    if let Some(rtt_idx) = line.find("rtt:") {
+                        // format check: rtt:12.34/5.67
+                        let after = &line[rtt_idx + 4..];
+                        let parts: Vec<&str> = after.split_whitespace().next().unwrap_or("").split('/').collect();
+                        if let Some(rtt_val_str) = parts.first() {
+                             if let Ok(rtt) = rtt_val_str.parse::<f64>() {
+                                 total_rtt += rtt;
+                                 count += 1;
+                             }
+                        }
+                    }
+                }
+                if count > 0 {
+                    latency_p50 = total_rtt / count as f64;
+                }
+                // active_connections includes header
+                active_connections = active_connections.saturating_sub(1); 
+            }
+        }
+
+        // Calculate rates
         let current_stats = NetStats {
             rx_bytes: total_rx_bytes,
             tx_bytes: total_tx_bytes,
@@ -437,62 +505,295 @@ impl ProcCollector {
             tx_drops: total_tx_drops,
         };
 
-        // Calculate per-second rates if we have previous stats
         if let Some(ref last_stats) = self.last_net_stats {
-            let time_diff = 60.0; // 60 seconds (1 minute) between collections
+            let time_diff = 60.0;
             let packets_sent_per_sec = ((current_stats.tx_packets.saturating_sub(last_stats.tx_packets)) as f64) / time_diff;
             let packets_received_per_sec = ((current_stats.rx_packets.saturating_sub(last_stats.rx_packets)) as f64) / time_diff;
             let bytes_sent_per_sec = ((current_stats.tx_bytes.saturating_sub(last_stats.tx_bytes)) as f64) / time_diff;
             let bytes_received_per_sec = ((current_stats.rx_bytes.saturating_sub(last_stats.rx_bytes)) as f64) / time_diff;
-            let drops = current_stats.rx_drops + current_stats.tx_drops;
-
-            self.metrics_tx.send(Metric {
+            
+            // Legacy Metrics
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_packets_sent".to_string(), packets_sent_per_sec, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_packets_received".to_string(), packets_received_per_sec, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_bytes_sent".to_string(), bytes_sent_per_sec, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_bytes_received".to_string(), bytes_received_per_sec, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_drops".to_string(), total_drops as f64, tags.clone())).await?;
+            
+            // V2 Advanced Metric (Consolidated)
+            // This metric contains all fields needed for network_metrics_ts
+            let mut v2_metric = Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "network".to_string(),
-                metric_name: "network_packets_sent".to_string(),
-                value: packets_sent_per_sec,
-                tags: tags.clone(),
-            }).await?;
-
-            self.metrics_tx.send(Metric {
-                timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "network".to_string(),
-                metric_name: "network_packets_received".to_string(),
-                value: packets_received_per_sec,
-                tags: tags.clone(),
-            }).await?;
-
-            self.metrics_tx.send(Metric {
-                timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "network".to_string(),
-                metric_name: "network_bytes_sent".to_string(),
-                value: bytes_sent_per_sec,
-                tags: tags.clone(),
-            }).await?;
-
-            self.metrics_tx.send(Metric {
-                timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "network".to_string(),
-                metric_name: "network_bytes_received".to_string(),
-                value: bytes_received_per_sec,
-                tags: tags.clone(),
-            }).await?;
-
-            self.metrics_tx.send(Metric {
-                timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "network".to_string(),
-                metric_name: "network_drops".to_string(),
-                value: drops as f64,
-                tags: tags.clone(),
-            }).await?;
+                self.hostname.clone(),
+                "network".to_string(),
+                "network_snapshot".to_string(),
+                0.0,
+                tags.clone()
+            );
+            
+            // Populate V2 fields
+            v2_metric.latency_p50 = Some(latency_p50);
+            v2_metric.latency_p90 = Some(latency_p50); // Approximate
+            v2_metric.latency_p99 = Some(latency_p50); // Approximate
+            v2_metric.retransmits = Some(retransmits);
+            v2_metric.packet_drops = Some(total_drops);
+            v2_metric.active_connections = Some(active_connections);
+            v2_metric.established = Some(established);
+            // Rough rate estimation if we had history, but for now raw counts or 0
+            v2_metric.open_rate = Some(0.0); 
+            v2_metric.close_rate = Some(0.0);
+            
+            // Send V2 metric
+            self.metrics_tx.send(v2_metric).await?;
         }
 
         self.last_net_stats = Some(current_stats);
+        Ok(())
+    }
+
+    /// Collect TCP flow data for "Active Flows" feature
+    /// Parses /proc/net/tcp to get active connections and sends as tcp_flow metrics
+    async fn collect_tcp_flows(&self, timestamp: i64, tags: &HashMap<String, String>) -> Result<()> {
+        // Read /proc/net/tcp (try host path first)
+        let tcp_content = match fs::read_to_string("/host/proc/net/tcp").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/proc/net/tcp").await.unwrap_or_default(),
+        };
+        
+        // Also read tcp6 for IPv6 connections
+        let tcp6_content = match fs::read_to_string("/host/proc/net/tcp6").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/proc/net/tcp6").await.unwrap_or_default(),
+        };
+
+        // Parse TCP connections and aggregate by remote address
+        let mut flow_map: HashMap<String, (u64, String)> = HashMap::new(); // key: remote_ip:port, value: (count, state)
+        
+        fn parse_tcp_line(line: &str, flow_map: &mut HashMap<String, (u64, String)>) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 4 {
+                return;
+            }
+            
+            // Format: sl local_address rem_address st ...
+            // Addresses are in hex: IP:PORT (little endian for IP)
+            let remote_hex = parts[2];
+            let state_hex = parts[3];
+            
+            // Parse remote address
+            if let Some((ip_hex, port_hex)) = remote_hex.split_once(':') {
+                // Convert hex port
+                let port = u16::from_str_radix(port_hex, 16).unwrap_or(0);
+                if port == 0 {
+                    return; // Skip listening sockets
+                }
+                
+                // Convert hex IP (little endian for IPv4)
+                let ip = if ip_hex.len() == 8 {
+                    // IPv4
+                    let ip_num = u32::from_str_radix(ip_hex, 16).unwrap_or(0);
+                    format!("{}.{}.{}.{}", 
+                        ip_num & 0xFF, 
+                        (ip_num >> 8) & 0xFF,
+                        (ip_num >> 16) & 0xFF,
+                        (ip_num >> 24) & 0xFF
+                    )
+                } else {
+                    // IPv6 - simplified, just use hex for now
+                    format!("ipv6:{}", &ip_hex[..16.min(ip_hex.len())])
+                };
+                
+                // Skip loopback
+                if ip.starts_with("127.") || ip == "0.0.0.0" {
+                    return;
+                }
+                
+                // Parse state
+                let state = match state_hex {
+                    "01" => "ESTABLISHED",
+                    "02" => "SYN_SENT",
+                    "03" => "SYN_RECV",
+                    "04" => "FIN_WAIT1",
+                    "05" => "FIN_WAIT2",
+                    "06" => "TIME_WAIT",
+                    "07" => "CLOSE",
+                    "08" => "CLOSE_WAIT",
+                    "09" => "LAST_ACK",
+                    "0A" => "LISTEN",
+                    _ => "UNKNOWN",
+                };
+                
+                let key = format!("{}:{}", ip, port);
+                flow_map.entry(key)
+                    .and_modify(|(count, _)| *count += 1)
+                    .or_insert((1, state.to_string()));
+            }
+        }
+        
+        // Parse IPv4 connections
+        for line in tcp_content.lines().skip(1) {
+            parse_tcp_line(line, &mut flow_map);
+        }
+        
+        // Parse IPv6 connections
+        for line in tcp6_content.lines().skip(1) {
+            parse_tcp_line(line, &mut flow_map);
+        }
+        
+        // Sort by connection count and take top 50
+        let mut flows: Vec<_> = flow_map.into_iter().collect();
+        flows.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+        
+        info!("[TCP FLOWS] Found {} unique remote endpoints, sending top {}", flows.len(), flows.len().min(50));
+        
+        // Send top 50 flows as tcp_flow metrics
+        for (idx, (remote, (count, state))) in flows.iter().take(50).enumerate() {
+            let parts: Vec<&str> = remote.split(':').collect();
+            let remote_ip = parts.get(0).unwrap_or(&"unknown");
+            let remote_port = parts.get(1).unwrap_or(&"0");
+            
+            let mut flow_tags = tags.clone();
+            flow_tags.insert("remote_ip".to_string(), remote_ip.to_string());
+            flow_tags.insert("remote_port".to_string(), remote_port.to_string());
+            flow_tags.insert("state".to_string(), state.clone());
+            flow_tags.insert("rank".to_string(), (idx + 1).to_string());
+            
+            self.metrics_tx.send(Metric::new_basic(
+                timestamp,
+                self.hostname.clone(),
+                "network".to_string(),
+                "tcp_flow".to_string(),
+                *count as f64,
+                flow_tags,
+            )).await?;
+        }
+        
+        info!("[TCP FLOWS] ✓ Sent {} tcp_flow metrics", flows.len().min(50));
+        Ok(())
+    }
+
+    /// Collect per-process network bandwidth for "Bandwidth by Process" feature
+    /// Scans processes with network sockets and gets their network I/O stats
+    async fn collect_process_bandwidth(&self, timestamp: i64, tags: &HashMap<String, String>) -> Result<()> {
+        let proc_path = if std::path::Path::new("/host/proc").exists() {
+            "/host/proc"
+        } else {
+            "/proc"
+        };
+        
+        // Collect processes with network activity
+        let mut process_network: HashMap<String, (u32, u64, u64, u32)> = HashMap::new(); // name -> (pid, bytes_sent, bytes_recv, socket_count)
+        const MAX_NETWORK_PROCESSES: usize = 50;
+        
+        // Read process directories
+        let proc_dir = match std::fs::read_dir(proc_path) {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::warn!("[PROCESS BANDWIDTH] Failed to read {}: {}", proc_path, e);
+                return Ok(());
+            }
+        };
+        
+        for entry in proc_dir {
+            if process_network.len() >= MAX_NETWORK_PROCESSES {
+                break;
+            }
+            
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            
+            let file_name = entry.file_name();
+            let pid_str = file_name.to_string_lossy();
+            
+            // Only process numeric directories (PIDs)
+            let pid: u32 = match pid_str.parse() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            
+            // Check if process has socket file descriptors
+            let fd_path = format!("{}/{}/fd", proc_path, pid);
+            let socket_count = match std::fs::read_dir(&fd_path) {
+                Ok(fd_dir) => {
+                    fd_dir.filter_map(|e| e.ok())
+                        .filter_map(|e| std::fs::read_link(e.path()).ok())
+                        .filter(|link| link.to_string_lossy().contains("socket:"))
+                        .count() as u32
+                }
+                Err(_) => continue, // No permission or doesn't exist
+            };
+            
+            if socket_count == 0 {
+                continue; // Skip processes without network sockets
+            }
+            
+            // Get process name
+            let comm_path = format!("{}/{}/comm", proc_path, pid);
+            let process_name = match std::fs::read_to_string(&comm_path) {
+                Ok(name) => name.trim().chars().take(15).collect::<String>(),
+                Err(_) => "unknown".to_string(),
+            };
+            
+            // Get network I/O stats from /proc/{pid}/net/dev
+            let net_dev_path = format!("{}/{}/net/dev", proc_path, pid);
+            let (bytes_sent, bytes_recv) = match std::fs::read_to_string(&net_dev_path) {
+                Ok(content) => {
+                    let mut total_sent = 0u64;
+                    let mut total_recv = 0u64;
+                    
+                    for line in content.lines().skip(2) { // Skip headers
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 10 {
+                            let interface = parts[0].trim_end_matches(':');
+                            if interface != "lo" { // Skip loopback
+                                total_recv += parts[1].parse::<u64>().unwrap_or(0);
+                                total_sent += parts[9].parse::<u64>().unwrap_or(0);
+                            }
+                        }
+                    }
+                    (total_sent, total_recv)
+                }
+                Err(_) => (0, 0),
+            };
+            
+            // Aggregate by process name
+            process_network.entry(process_name.clone())
+                .and_modify(|(_, sent, recv, sockets)| {
+                    *sent += bytes_sent;
+                    *recv += bytes_recv;
+                    *sockets += socket_count;
+                })
+                .or_insert((pid, bytes_sent, bytes_recv, socket_count));
+        }
+        
+        info!("[PROCESS BANDWIDTH] Found {} processes with network activity", process_network.len());
+        
+        // Sort by total bytes and send top 20
+        let mut sorted: Vec<_> = process_network.into_iter().collect();
+        sorted.sort_by(|a, b| (b.1.1 + b.1.2).cmp(&(a.1.1 + a.1.2)));
+        
+        for (idx, (name, (pid, bytes_sent, bytes_recv, sockets))) in sorted.iter().take(20).enumerate() {
+            let mut bw_tags = tags.clone();
+            bw_tags.insert("process_name".to_string(), name.clone());
+            bw_tags.insert("pid".to_string(), pid.to_string());
+            bw_tags.insert("rank".to_string(), (idx + 1).to_string());
+            bw_tags.insert("sockets".to_string(), sockets.to_string());
+            bw_tags.insert("bytes_sent".to_string(), bytes_sent.to_string());
+            bw_tags.insert("bytes_received".to_string(), bytes_recv.to_string());
+            
+            let total_bytes = *bytes_sent + *bytes_recv;
+            self.metrics_tx.send(Metric::new_basic(
+                timestamp,
+                self.hostname.clone(),
+                "network".to_string(),
+                "process_network_bandwidth".to_string(),
+                total_bytes as f64,
+                bw_tags,
+            )).await?;
+        }
+        
+        info!("[PROCESS BANDWIDTH] ✓ Sent {} process_network_bandwidth metrics", sorted.len().min(20));
         Ok(())
     }
 
@@ -577,14 +878,14 @@ impl ProcCollector {
             process_tags.insert("rank".to_string(), (idx + 1).to_string());
             process_tags.insert("command_line".to_string(), cmd_line.clone());
             
-            match self.metrics_tx.send(Metric {
+            match self.metrics_tx.send(Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "process".to_string(),
-                metric_name: "process_cpu_usage".to_string(),
-                value: *cpu as f64,
-                tags: process_tags,
-            }).await {
+                self.hostname.clone(),
+                "process".to_string(),
+                "process_cpu_usage".to_string(),
+                *cpu as f64,
+                process_tags,
+            )).await {
                 Ok(_) => info!("[TOP PROCESSES] ✓ Sent CPU metric for {}", name),
                 Err(e) => {
                     tracing::error!("[TOP PROCESSES] Failed to send CPU metric for {}: {}", name, e);
@@ -603,14 +904,14 @@ impl ProcCollector {
             process_tags.insert("rank".to_string(), (idx + 1).to_string());
             process_tags.insert("command_line".to_string(), cmd_line.clone());
             
-            self.metrics_tx.send(Metric {
+            self.metrics_tx.send(Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "process".to_string(),
-                metric_name: "process_memory_mb".to_string(),
-                value: (*memory / 1024 / 1024) as f64,
-                tags: process_tags,
-            }).await?;
+                self.hostname.clone(),
+                "process".to_string(),
+                "process_memory_mb".to_string(),
+                (*memory / 1024 / 1024) as f64,
+                process_tags,
+            )).await?;
         }
         
         // For disk I/O and network, we'll collect from /proc/<pid>/io
@@ -672,14 +973,14 @@ impl ProcCollector {
             process_tags.insert("rank".to_string(), (idx + 1).to_string());
             process_tags.insert("command_line".to_string(), cmd_line.clone());
             
-            self.metrics_tx.send(Metric {
+            self.metrics_tx.send(Metric::new_basic(
                 timestamp,
-                hostname: self.hostname.clone(),
-                metric_type: "process".to_string(),
-                metric_name: "process_disk_io_mb".to_string(),
-                value: (*io_bytes / 1024 / 1024) as f64,
-                tags: process_tags,
-            }).await?;
+                self.hostname.clone(),
+                "process".to_string(),
+                "process_disk_io_mb".to_string(),
+                (*io_bytes / 1024 / 1024) as f64,
+                process_tags,
+            )).await?;
         }
         
         // For network, we'll use a simplified approach - track processes that might be network-intensive
