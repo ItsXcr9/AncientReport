@@ -210,8 +210,9 @@ async function fetchAnomalies(hostname?: string): Promise<AnomaliesResponse> {
   return response.json();
 }
 
-async function fetchProcessDrilldown(pid: number): Promise<ProcessDrilldown> {
-  const response = await fetch(`${METRICS_API}/api/v3/ebpf/process/${pid}/drilldown`);
+async function fetchProcessDrilldown(pid: number, hostname?: string): Promise<ProcessDrilldown> {
+  const params = hostname ? `?hostname=${encodeURIComponent(hostname)}` : '';
+  const response = await fetch(`${METRICS_API}/api/v3/ebpf/process/${pid}/drilldown${params}`);
   if (!response.ok) throw new Error("Failed to fetch drilldown");
   return response.json();
 }
@@ -259,8 +260,8 @@ export function NetworkMetricsPanel({ selectedNode, compact = false }: MetricsPa
   });
 
   const { data: drilldownData, isLoading: drilldownLoading } = useQuery({
-    queryKey: ["process-drilldown", selectedPid],
-    queryFn: () => fetchProcessDrilldown(selectedPid!),
+    queryKey: ["process-drilldown", selectedPid, hostname],
+    queryFn: () => fetchProcessDrilldown(selectedPid!, hostname),
     enabled: selectedPid !== null,
   });
 

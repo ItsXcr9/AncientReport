@@ -17,6 +17,11 @@ def set_clickhouse_client(client):
     global clickhouse_client
     clickhouse_client = client
 
+@router.get("/health")
+async def api_health_check():
+    """Simple API health check."""
+    return {"status": "ok", "service": "analysis-api"}
+
 @router.get("/healthchecks", response_model=List[Dict[str, Any]])
 async def get_container_healthchecks(hostname: Optional[str] = Query(None)):
     """

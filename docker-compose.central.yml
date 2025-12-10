@@ -49,7 +49,10 @@ services:
 
   # Python analysis engine
   analysis:
-    image: ghcr.io/itsxcr9/ancientreport/analysis:latest
+    # image: ghcr.io/itsxcr9/ancientreport/analysis:latest
+    build: 
+      context: ./analysis
+      dockerfile: Dockerfile
     container_name: AncientReport-analysis
     ports:
       - "6800:8800"
@@ -67,6 +70,7 @@ services:
       NATS_URL: nats://nats:4222
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./analysis/src:/app/src:ro
     depends_on:
       - clickhouse
       - nats
@@ -81,7 +85,10 @@ services:
 
   # React frontend
   ui:
-    image: ghcr.io/itsxcr9/ancientreport/ui:latest
+    # image: ghcr.io/itsxcr9/ancientreport/ui:latest
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
     container_name: AncientReport-ui
     ports:
       - "6080:3000"

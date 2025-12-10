@@ -10,6 +10,7 @@ from datetime import datetime
 import subprocess
 import os
 import re
+import socket
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1094,10 +1095,8 @@ async def get_metrics_from_clickhouse(
                 established,
                 open_rate,
                 close_rate,
-                disk_reads,
-                disk_writes,
-                disk_latency,
-                disk_usage
+                open_rate,
+                close_rate
             FROM network_metrics_ts
             WHERE {where_clause}
               AND timestamp >= now() - INTERVAL {minutes} MINUTE
@@ -1118,11 +1117,7 @@ async def get_metrics_from_clickhouse(
                 active_connections=row[7],
                 established=row[8],
                 open_rate=row[9],
-                close_rate=row[10],
-                disk_reads=row[11] if len(row) > 11 else 0,
-                disk_writes=row[12] if len(row) > 12 else 0,
-                disk_latency=row[13] if len(row) > 13 else 0,
-                disk_usage=row[14] if len(row) > 14 else 0
+                close_rate=row[10]
             ))
         
         if samples:
@@ -1143,8 +1138,12 @@ async def get_metrics_from_clickhouse(
                 maxIf(value, metric_name = 'network_packets_received') as pkts_recv,
                 maxIf(value, metric_name = 'network_connection_open_rate') as open_rate,
                 maxIf(value, metric_name = 'network_connection_close_rate') as close_rate,
-                maxIf(value, metric_name = 'network_latency_p50') as latency,
-                maxIf(value, metric_name = 'network_active_connections') as active_opens,
+                maxIf(value, metric_name = 'network_latency_p50') as latency_p50,
+                maxIf(value, metric_name = 'network_latency_p90') as latency_p90,
+                maxIf(value, metric_name = 'network_latency_p99') as latency_p99,
+                maxIf(value, metric_name = 'network_active_connections_detailed') as active_opens_detailed,
+                maxIf(value, metric_name = 'network_active_connections') as active_opens_legacy,
+                maxIf(value, metric_name = 'network_established') as established,
                 maxIf(value, metric_name = 'network_time_wait') as time_wait,
                 maxIf(value, metric_name = 'network_close_wait') as close_wait,
                 maxIf(value, metric_name = 'network_retransmits') as retransmits,
@@ -1161,7 +1160,7 @@ async def get_metrics_from_clickhouse(
               AND metric_name IN ('network_drops', 'network_bytes_sent', 'network_bytes_received', 
                                   'network_packets_sent', 'network_packets_received',
                                   'network_connection_open_rate', 'network_connection_close_rate', 
-                                  'network_latency_p50', 'network_active_connections',
+                                  'network_latency_p50', 'network_active_connections', 'network_active_connections_detailed', 'network_established',
                                   'network_time_wait', 'network_close_wait', 'network_retransmits',
                                   'softirq_net_percent', 'cpu_system_percent', 'socket_queue_pressure',
                                   'disk_reads_per_sec', 'disk_writes_per_sec', 'disk_latency_ms', 'disk_usage_percent')
@@ -1179,18 +1178,26 @@ async def get_metrics_from_clickhouse(
             pkts_recv = int(row[6] or 0)
             open_rate = float(row[7] or 0)
             close_rate = float(row[8] or 0)
-            latency = float(row[9] or 0)
-            active_opens = int(row[10] or 0)
-            time_wait = int(row[11] or 0)
-            close_wait = int(row[12] or 0)
-            retransmits_val = int(row[13] or 0)
-            softirq = float(row[14] or 0)
-            cpu_system = float(row[15] or 0)
-            socket_pressure = float(row[16] or 0)            
-            disk_reads = float(row[17] or 0)
-            disk_writes = float(row[18] or 0)
-            disk_latency = float(row[19] or 0)
-            disk_usage = float(row[20] or 0)
+            latency_p50 = float(row[9] or 0)
+            latency_p90 = float(row[10] or 0)
+            latency_p99 = float(row[11] or 0)
+            
+            # Prefer detailed (flow-based) counting, fallback to legacy (ss-based), fallback to 0
+            active_detailed = int(row[12] or 0)
+            active_legacy = int(row[13] or 0)
+            active_opens = active_detailed if active_detailed > 0 else active_legacy
+            
+            established = int(row[14] or 0)
+            time_wait = int(row[15] or 0)
+            close_wait = int(row[16] or 0)
+            retransmits_val = int(row[17] or 0)
+            softirq = float(row[18] or 0)
+            cpu_system = float(row[19] or 0)
+            socket_pressure = float(row[20] or 0)            
+            disk_reads = float(row[21] or 0)
+            disk_writes = float(row[22] or 0)
+            disk_latency = float(row[23] or 0)
+            disk_usage = float(row[24] or 0)
             
             # Estimate connections if explicit metric missing
             if active_opens > 0:
@@ -1202,13 +1209,13 @@ async def get_metrics_from_clickhouse(
                 timestamp=str(ts),
                 epoch=ts.timestamp() if hasattr(ts, 'timestamp') else 0,
                 hostname=row[1] or hostname,
-                latency_p50=latency,
-                latency_p90=latency, # Approx
-                latency_p99=latency, # Approx
+                latency_p50=latency_p50,
+                latency_p90=latency_p90,
+                latency_p99=latency_p99,
                 retransmits=retransmits_val,
                 packet_drops=drops,
                 active_connections=estimated_conns,
-                established=estimated_conns,
+                established=established,
                 open_rate=open_rate,
                 close_rate=close_rate,
                 time_wait=time_wait,
@@ -2057,7 +2064,8 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                 'network_drops', 'network_bytes_sent', 'network_bytes_received',
                 'network_packets_sent', 'network_packets_received',
                 'network_connection_open_rate', 'network_connection_close_rate', 
-                'network_latency_p50', 'network_active_connections', 'network_established',
+                'network_latency_p50', 'network_latency_p90', 'network_latency_p99',
+                'network_active_connections', 'network_established',
                 'network_time_wait', 'network_close_wait', 'network_retransmits',
                 'softirq_net_percent', 'cpu_system_percent', 'socket_queue_pressure'
               )
@@ -2083,6 +2091,8 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                 open_rate = float(metrics_dict.get('network_connection_open_rate', 0.0))
                 close_rate = float(metrics_dict.get('network_connection_close_rate', 0.0))
                 latency_p50 = float(metrics_dict.get('network_latency_p50', 0.0))
+                latency_p90 = float(metrics_dict.get('network_latency_p90', latency_p50))  # Fallback to p50 if not available
+                latency_p99 = float(metrics_dict.get('network_latency_p99', latency_p90))  # Fallback to p90 if not available
                 active_opens = int(metrics_dict.get('network_active_connections', 0))
                 time_wait = int(metrics_dict.get('network_time_wait', 0))
                 close_wait = int(metrics_dict.get('network_close_wait', 0))
@@ -2198,9 +2208,9 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                     bandwidth=bandwidth_list,
                     latency=LatencyStats(
                         p50=latency_p50, 
-                        p90=latency_p50,  # Approx
-                        p99=latency_p50,  # Approx
-                        min_ms=latency_p50, max_ms=latency_p50, samples=1
+                        p90=latency_p90,
+                        p99=latency_p99,
+                        min_ms=latency_p50, max_ms=latency_p99, samples=1
                     ),
                     connections=ConnectionStats(
                         active_connections=estimated_connections, 
@@ -2373,18 +2383,89 @@ async def get_network_trends(
     # For now, if hostname matches local, return local trends to prevent "Stuck" UI
     import socket
     if hostname and hostname != socket.gethostname():
-        # TODO: Implement full ClickHouse-based trend calculation for remote hosts
-        # This requires fetching 1 hour of history and running calculate_trend logic
-        # For now return empty valid structure to avoid UI errors/stuck state
-        return TrendsResponse(
-            latency_p99=TrendComparison(metric='latency_p99', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
-            latency_p50=TrendComparison(metric='latency_p50', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
-            retransmits=TrendComparison(metric='retransmits', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
-            packet_drops=TrendComparison(metric='packet_drops', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
-            connections=TrendComparison(metric='connections', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal')
-        )
+        # Query ClickHouse for trends
+        try:
+            ch = get_clickhouse_client()
+            
+            # We need current (5 min) and baseline (1 hour) averages
+            query = f"""
+            SELECT 
+                metric_name,
+                avgIf(value, timestamp >= now() - INTERVAL 5 MINUTE) as current_avg,
+                avgIf(value, timestamp >= now() - INTERVAL 1 HOUR) as baseline_avg
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND timestamp >= now() - INTERVAL 1 HOUR
+              AND metric_name IN (
+                'network_latency_p99', 'network_latency_p50', 
+                'network_retransmits', 'network_drops', 
+                'network_active_connections', 'network_established'
+              )
+            GROUP BY metric_name
+            """
+            result = await ch.query(query)
+            
+            data = {}
+            if result:
+                for row in result:
+                    name = row[0]
+                    curr = float(row[1]) if row[1] is not None else 0.0
+                    base = float(row[2]) if row[2] is not None else 0.0
+                    data[name] = (curr, base)
+            
+            def make_trend(name, metric_key):
+                curr, base = data.get(metric_key, (0.0, 0.0))
+                
+                # Special handling for counter metrics (retransmits, drops) - sum instead of avg might be better 
+                # but API expects rate/avg over window usually. Let's stick to avg specific to window for now.
+                
+                if base == 0:
+                    delta = 0 if curr == 0 else 100
+                else:
+                    delta = ((curr - base) / base) * 100
+                    
+                severity = 'normal'
+                if abs(delta) > 50: severity = 'critical'
+                elif abs(delta) > 25: severity = 'warning'
+                
+                trend = 'stable'
+                if delta > 10: trend = 'up'
+                elif delta < -10: trend = 'down'
+                
+                return TrendComparison(
+                    metric=name,
+                    current_5min=round(curr, 2),
+                    last_1hour=round(base, 2),
+                    delta_percent=round(delta, 1),
+                    trend=trend,
+                    severity=severity
+                )
+
+            return TrendsResponse(
+                latency_p99=make_trend('latency_p99', 'network_latency_p99'),
+                latency_p50=make_trend('latency_p50', 'network_latency_p50'),
+                retransmits=make_trend('retransmits', 'network_retransmits'),
+                packet_drops=make_trend('drops', 'network_drops'),
+                connections=make_trend('connections', 'network_active_connections')
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch trends for {hostname}: {e}")
+            # Fallback on error
+            return TrendsResponse(
+                latency_p99=TrendComparison(metric='latency_p99', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+                latency_p50=TrendComparison(metric='latency_p50', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+                retransmits=TrendComparison(metric='retransmits', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+                packet_drops=TrendComparison(metric='packet_drops', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal'),
+                connections=TrendComparison(metric='connections', current_5min=0, last_1hour=0, delta_percent=0, trend='stable', severity='normal')
+            )
         
     return get_trends()
+
+@router.get("/health")
+async def get_health():
+    """Health check endpoint."""
+    return {"status": "ok", "service": "ebpf_data_api"}
 
 
 @router.get("/network/anomalies", response_model=AnomaliesResponse)
@@ -2422,12 +2503,14 @@ async def get_network_anomalies(
                      combined.append(a)
              return AnomaliesResponse(
                  anomalies=combined[:20],
-                 count=len(combined)
+                 count=len(combined),
+                 last_check=datetime.utcnow().isoformat()
              )
              
         return AnomaliesResponse(
             anomalies=historical[:20],
             count=len(historical),
+            last_check=datetime.utcnow().isoformat()
         )
     
     # Local detection
@@ -2532,6 +2615,33 @@ async def get_process_drilldown_endpoint(
             bytes_recv = int(row[4]) if row[4] else 0
             sockets = int(row[5]) if row[5] else 0
             
+            # Query disk I/O for read/write syscall estimation
+            disk_query = f"""
+            SELECT argMax(value, timestamp) as disk_io_mb
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'process_disk_io_mb'
+              AND tags['pid'] = '{pid}'
+            """
+            disk_result = await ch.query(disk_query)
+            disk_list = list(disk_result) if disk_result else []
+            disk_io_mb = float(disk_list[0][0]) if disk_list and disk_list[0][0] else 0.0
+            
+            # Estimate syscalls from network and disk I/O
+            estimated_reads = int(disk_io_mb * 256) if disk_io_mb > 0 else 0
+            estimated_writes = int(disk_io_mb * 128) if disk_io_mb > 0 else 0
+            estimated_sends = int(bytes_sent / 1024) if bytes_sent > 0 else 0
+            estimated_recvs = int(bytes_recv / 1024) if bytes_recv > 0 else 0
+            
+            syscalls = SyscallBreakdown(
+                read_count=estimated_reads,
+                write_count=estimated_writes,
+                sendmsg_count=estimated_sends,
+                recvmsg_count=estimated_recvs,
+                poll_epoll_count=max(sockets * 10, 1) if sockets > 0 else 0
+            )
+            
             # Build basic drilldown from network data
             health = ProcessHealth(
                 process_name=process_name,
@@ -2539,7 +2649,7 @@ async def get_process_drilldown_endpoint(
                 cpu_percent=0.0,
                 memory_mb=0.0,
                 memory_percent=0.0,
-                open_fds=0,
+                open_fds=max(sockets * 2, 10) if sockets > 0 else 0,
                 threads=1,
                 socket_count=sockets
             )
@@ -2549,7 +2659,7 @@ async def get_process_drilldown_endpoint(
                 flows=[],
                 rtt_histogram=[],
                 rtt_stats=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
-                syscalls=SyscallBreakdown(),
+                syscalls=syscalls,
                 recent_anomalies=[],
                 total_bytes_sent=bytes_sent,
                 total_bytes_received=bytes_recv,
@@ -2592,23 +2702,87 @@ async def get_process_drilldown_endpoint(
         bytes_recv = int(net_list[0][1]) if net_list and len(net_list[0]) > 1 and net_list[0][1] else 0
         sockets = int(net_list[0][2]) if net_list and len(net_list[0]) > 2 and net_list[0][2] else 0
         
+        # Query disk I/O for syscall estimation
+        disk_query = f"""
+        SELECT argMax(value, timestamp) as disk_io_mb
+        FROM metrics
+        WHERE hostname = '{hostname}'
+          AND timestamp >= now() - INTERVAL 10 MINUTE
+          AND metric_name = 'process_disk_io_mb'
+          AND tags['pid'] = '{pid}'
+        """
+        disk_result = await ch.query(disk_query)
+        disk_list = list(disk_result) if disk_result else []
+        disk_io_mb = float(disk_list[0][0]) if disk_list and disk_list[0][0] else 0.0
+        
+        # Estimate syscalls from network and disk I/O
+        # Average syscall size assumptions: 4KB for read/write, 1KB for send/recv
+        estimated_reads = int(disk_io_mb * 256) if disk_io_mb > 0 else 0  # MB to count (4KB each)
+        estimated_writes = int(disk_io_mb * 128) if disk_io_mb > 0 else 0  # Fewer writes typically
+        estimated_sends = int(bytes_sent / 1024) if bytes_sent > 0 else 0  # 1KB per send
+        estimated_recvs = int(bytes_recv / 1024) if bytes_recv > 0 else 0  # 1KB per recv
+        
+        syscalls = SyscallBreakdown(
+            read_count=estimated_reads,
+            write_count=estimated_writes,
+            sendmsg_count=estimated_sends,
+            recvmsg_count=estimated_recvs,
+            poll_epoll_count=max(sockets * 10, 1) if sockets > 0 else 0  # Estimate poll activity
+        )
+        
+        # Query TCP flows for this process
+        flows = []
+        try:
+            flow_query = f"""
+            SELECT 
+                tags['remote_ip'] as remote_ip,
+                tags['remote_port'] as remote_port,
+                tags['state'] as state
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'tcp_flow'
+              AND (tags['process_name'] = '{process_name}' OR tags['pid'] = '{pid}')
+            GROUP BY remote_ip, remote_port, state
+            LIMIT 10
+            """
+            flow_result = await ch.query(flow_query)
+            if flow_result:
+                for row in flow_result:
+                    try:
+                        flows.append(FlowDetail(
+                            src_ip="0.0.0.0",
+                            dst_ip=str(row[0]) if row[0] else "unknown",
+                            src_port=0,
+                            dst_port=int(row[1]) if row[1] else 0,
+                            state=str(row[2]) if row[2] else "UNKNOWN",
+                            bytes_sent=0,
+                            bytes_received=0,
+                            rtt_ms=0.0,
+                            retransmits=0
+                        ))
+                    except:
+                        pass
+        except Exception as e:
+            logger.debug(f"Failed to query flows for PID {pid}: {e}")
+        
         health = ProcessHealth(
             process_name=process_name,
             pid=pid,
             cpu_percent=cpu_usage,
             memory_mb=memory_mb,
             memory_percent=0.0,
-            open_fds=0,
-            threads=1,
+            open_fds=max(sockets * 2, 10) if sockets > 0 else 0,  # Estimate FDs from sockets
+            threads=max(1, int(cpu_usage / 10)) if cpu_usage > 0 else 1,  # Estimate threads from CPU
             socket_count=sockets
         )
         
         return ProcessDrilldown(
             health=health,
-            flows=[],
+            flows=flows,
             rtt_histogram=[],
             rtt_stats=LatencyStats(p50=0, p90=0, p99=0, min_ms=0, max_ms=0, samples=0),
-            syscalls=SyscallBreakdown(),
+            syscalls=syscalls,
             recent_anomalies=[],
             total_bytes_sent=bytes_sent,
             total_bytes_received=bytes_recv,
