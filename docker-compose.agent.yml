@@ -1,4 +1,4 @@
-version: "3.8"
+#version: "3.8"
 
 # Remote Agent - Deploy on each monitored server
 # This agent collects metrics and sends them to the central ClickHouse server
@@ -14,26 +14,20 @@ services:
     environment:
       TZ: ${TZ:-Asia/Tehran}
       # Central ClickHouse connection - REQUIRED (V1 mode)
-      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:?Please set CLICKHOUSE_HOST in .env file}
-      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-6123}
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-AncientReport}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-AncientReport}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-AncientReport}
-      # V2 Mode: NATS streaming - REQUIRED for V2 mode
-      # Set NATS_URL in .env file (e.g., NATS_URL=nats://65.109.200.75:4222)
-      # Or comment out both lines below to use V1 direct ClickHouse mode
-      NATS_URL: ${NATS_URL}
-      NATS_ENABLED: ${NATS_ENABLED:-true}
-      # Agent hostname (auto-detect if not set)
-      AGENT_HOSTNAME: ${AGENT_HOSTNAME:-auto-detect}
+      CLICKHOUSE_HOST: 65.109.200.75
+      CLICKHOUSE_PORT: 6123
+      CLICKHOUSE_DB: AncientReport
+      CLICKHOUSE_USER: AncientReport
+      CLICKHOUSE_PASSWORD: AncientReport
+      NATS_URL: nats://65.109.200.75:4222
+      NATS_ENABLED: true
+      AGENT_HOSTNAME: localtest
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /sys/fs/bpf:/sys/fs/bpf:ro
       - /proc:/host/proc:ro
-      # Mount config directory instead of file to avoid Docker creating a directory
       - ./agent:/etc/AncientReport/config-source:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Mount timezone files to ensure correct time
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
@@ -42,5 +36,3 @@ services:
       options:
         syslog-address: "udp://65.109.200.75:5515"
         tag: "{{.Name}}"
-# Note: This docker-compose file does NOT create any networks or volumes
-# The agent connects directly to the central ClickHouse server over the network
