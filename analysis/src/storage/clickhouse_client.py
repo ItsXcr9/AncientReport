@@ -18,19 +18,11 @@ class ClickHouseClient:
         self.user = user
         self.password = password
         
-        # Use clickhouse-driver's native protocol (port 9000)
-        # We are on the bridge network now, so we access the service port directly
+        # Use clickhouse-driver's native protocol (port 9000 inside Docker)
+        # When running inside Docker network, use 9000 (internal). External access uses 6001 mapping.
         self.client = Client(host=host, port=9000, database=database, user=user, password=password)
         
         logger.info(f"ClickHouse client initialized: {host}:{port}/{database} (user: {user})")
-    
-    def execute(self, query: str, params: dict = None):
-        """Execute a synchronous query (direct wrapper for underlying client)"""
-        try:
-            return self.client.execute(query, params)
-        except Exception as e:
-            logger.error(f"Execute failed: {e}")
-            raise
     
     async def query(self, sql: str) -> List[tuple]:
         """Execute a query and return results"""

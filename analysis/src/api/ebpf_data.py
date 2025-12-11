@@ -1263,7 +1263,7 @@ async def get_anomalies_from_clickhouse(
         """)
         
         anomalies = []
-        for row in result:
+        for row in result.result_rows:
             anomalies.append(AnomalyEvent(
                 timestamp=str(row[0]),
                 event_type=row[1],
@@ -2407,14 +2407,10 @@ async def get_network_trends(
             
             data = {}
             if result:
-                import math
                 for row in result:
                     name = row[0]
                     curr = float(row[1]) if row[1] is not None else 0.0
                     base = float(row[2]) if row[2] is not None else 0.0
-                    # Replace NaN with 0.0 to prevent JSON serialization errors
-                    if math.isnan(curr): curr = 0.0
-                    if math.isnan(base): base = 0.0
                     data[name] = (curr, base)
             
             def make_trend(name, metric_key):
@@ -2797,4 +2793,3 @@ async def get_process_drilldown_endpoint(
         logger.error(f"Failed to get process drilldown for {hostname}:{pid}: {e}")
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Process {pid} not found on {hostname}")
-
