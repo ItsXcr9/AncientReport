@@ -540,15 +540,18 @@ impl ProcCollector {
             }
         }
         
-        // 3. Get Latency via ss -ti (approx p50)
-        // Note: Running command might be slow, so simple implementation
-        let mut latency_p50: f64 = 0.0;
+        // 3. Get Latency via ss -ti
+        // Collect all RTTs to calculate real percentiles
+        let mut rtt_values: Vec<f64> = Vec::new();
         let mut active_connections: u64 = 0;
+        
+        let mut latency_p50: f64 = 0.0;
+        let mut latency_p90: f64 = 0.0;
+        let mut latency_p99: f64 = 0.0;
+        
         if let Ok(output) = Command::new("ss").args(&["-ti"]).output() {
             if output.status.success() {
                 let output_str = String::from_utf8_lossy(&output.stdout);
-                let mut total_rtt = 0.0;
-                let mut count = 0;
                 
                 for line in output_str.lines() {
                     active_connections += 1;
@@ -558,15 +561,21 @@ impl ProcCollector {
                         let parts: Vec<&str> = after.split_whitespace().next().unwrap_or("").split('/').collect();
                         if let Some(rtt_val_str) = parts.first() {
                              if let Ok(rtt) = rtt_val_str.parse::<f64>() {
-                                 total_rtt += rtt;
-                                 count += 1;
+                                 rtt_values.push(rtt);
                              }
                         }
                     }
                 }
-                if count > 0 {
-                    latency_p50 = total_rtt / count as f64;
+                
+                if !rtt_values.is_empty() {
+                    rtt_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let len = rtt_values.len();
+                    
+                    latency_p50 = rtt_values[len / 2];
+                    latency_p90 = rtt_values[(len * 9) / 10];
+                    latency_p99 = rtt_values[(len * 99) / 100];
                 }
+                
                 // active_connections includes header
                 active_connections = active_connections.saturating_sub(1); 
             }
@@ -640,6 +649,8 @@ impl ProcCollector {
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_connection_open_rate".to_string(), connection_open_rate, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_connection_close_rate".to_string(), connection_close_rate, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_latency_p50".to_string(), latency_p50, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_latency_p90".to_string(), latency_p90, tags.clone())).await?;
+            self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_latency_p99".to_string(), latency_p99, tags.clone())).await?;
             self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_active_connections".to_string(), active_connections as f64, tags.clone())).await?;
             
             // New Comprehensive Metrics
@@ -662,8 +673,8 @@ impl ProcCollector {
             
             // Populate V2 fields
             v2_metric.latency_p50 = Some(latency_p50);
-            v2_metric.latency_p90 = Some(latency_p50); // Approximate
-            v2_metric.latency_p99 = Some(latency_p50); // Approximate
+            v2_metric.latency_p90 = Some(latency_p90);
+            v2_metric.latency_p99 = Some(latency_p99);
             v2_metric.retransmits = Some(retransmits);
             v2_metric.packet_drops = Some(total_drops);
             v2_metric.active_connections = Some(active_connections);
@@ -695,10 +706,21 @@ impl ProcCollector {
             Err(_) => fs::read_to_string("/proc/net/tcp6").await.unwrap_or_default(),
         };
 
+        // Read UDP connections
+        let udp_content = match fs::read_to_string("/host/proc/net/udp").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/proc/net/udp").await.unwrap_or_default(),
+        };
+        
+        let udp6_content = match fs::read_to_string("/host/proc/net/udp6").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/proc/net/udp6").await.unwrap_or_default(),
+        };
+
         // Parse TCP connections and aggregate by remote address
         let mut flow_map: HashMap<String, (u64, String)> = HashMap::new(); // key: remote_ip:port, value: (count, state)
         
-        fn parse_tcp_line(line: &str, flow_map: &mut HashMap<String, (u64, String)>) {
+        fn parse_net_line(line: &str, flow_map: &mut HashMap<String, (u64, String)>, is_udp: bool) {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() < 4 {
                 return;
@@ -732,48 +754,64 @@ impl ProcCollector {
                     format!("ipv6:{}", &ip_hex[..16.min(ip_hex.len())])
                 };
                 
-                // Skip loopback
-                if ip.starts_with("127.") || ip == "0.0.0.0" {
+                // Skip invalid 0.0.0.0 addresses (usually listening sockets misparsed or similar)
+                if ip == "0.0.0.0" {
                     return;
                 }
                 
                 // Parse state
-                let state = match state_hex {
-                    "01" => "ESTABLISHED",
-                    "02" => "SYN_SENT",
-                    "03" => "SYN_RECV",
-                    "04" => "FIN_WAIT1",
-                    "05" => "FIN_WAIT2",
-                    "06" => "TIME_WAIT",
-                    "07" => "CLOSE",
-                    "08" => "CLOSE_WAIT",
-                    "09" => "LAST_ACK",
-                    "0A" => "LISTEN",
-                    _ => "UNKNOWN",
+                let state = if is_udp {
+                    "UDP".to_string()
+                } else {
+                    match state_hex {
+                        "01" => "ESTABLISHED".to_string(),
+                        "02" => "SYN_SENT".to_string(),
+                        "03" => "SYN_RECV".to_string(),
+                        "04" => "FIN_WAIT1".to_string(),
+                        "05" => "FIN_WAIT2".to_string(),
+                        "06" => "TIME_WAIT".to_string(),
+                        "07" => "CLOSE".to_string(),
+                        "08" => "CLOSE_WAIT".to_string(),
+                        "09" => "LAST_ACK".to_string(),
+                        "0A" => "LISTEN".to_string(),
+                        _ => "UNKNOWN".to_string(),
+                    }
                 };
                 
                 let key = format!("{}:{}", ip, port);
                 flow_map.entry(key)
                     .and_modify(|(count, _)| *count += 1)
-                    .or_insert((1, state.to_string()));
+                    .or_insert((1, state));
             }
         }
         
-        // Parse IPv4 connections
+        // Parse IPv4 TCP
         for line in tcp_content.lines().skip(1) {
-            parse_tcp_line(line, &mut flow_map);
+            parse_net_line(line, &mut flow_map, false);
         }
         
-        // Parse IPv6 connections
+        // Parse IPv6 TCP
         for line in tcp6_content.lines().skip(1) {
-            parse_tcp_line(line, &mut flow_map);
+            parse_net_line(line, &mut flow_map, false);
+        }
+
+        // Parse IPv4 UDP
+        for line in udp_content.lines().skip(1) {
+            parse_net_line(line, &mut flow_map, true);
+        }
+
+        // Parse IPv6 UDP
+        for line in udp6_content.lines().skip(1) {
+            parse_net_line(line, &mut flow_map, true);
         }
         
-        // Calculate Close Wait & Established counts from flow map
+        // Calculate counts
         let mut close_wait_count = 0u64;
         let mut established_count = 0u64;
+        let mut active_count = 0u64;
         
         for (_, (_, state)) in &flow_map {
+            active_count += 1;
             if state == "CLOSE_WAIT" {
                 close_wait_count += 1;
             } else if state == "ESTABLISHED" {
@@ -785,13 +823,17 @@ impl ProcCollector {
         self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_close_wait".to_string(), close_wait_count as f64, tags.clone())).await?;
         self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_established".to_string(), established_count as f64, tags.clone())).await?;
         
+        // IMPORTANT: Override the "active_connections" metric (which might be estimated from /proc/net/snmp) with our concrete flow count
+        // This resolves the issue where only TCP stats from SNMP were being used.
+        self.metrics_tx.send(Metric::new_basic(timestamp, self.hostname.clone(), "network".to_string(), "network_active_connections_detailed".to_string(), active_count as f64, tags.clone())).await?;
+        
         // Sort by connection count and take top 50
         let mut flows: Vec<_> = flow_map.into_iter().collect();
         flows.sort_by(|a, b| b.1.0.cmp(&a.1.0));
         
-        info!("[TCP FLOWS] Found {} unique remote endpoints, sending top {}", flows.len(), flows.len().min(50));
+        info!("[NET FLOWS] Found {} unique remote endpoints (TCP+UDP), sending top {}", flows.len(), flows.len().min(50));
         
-        // Send top 50 flows as tcp_flow metrics
+        // Send top 50 flows as tcp_flow metrics (keeping name strict for compatibility but now includes UDP)
         for (idx, (remote, (count, state))) in flows.iter().take(50).enumerate() {
             let parts: Vec<&str> = remote.split(':').collect();
             let remote_ip = parts.get(0).unwrap_or(&"unknown");
@@ -1168,5 +1210,4 @@ struct NetStats {
     socket_pressure: u64,
     total_cpu: u64,
 }
-
 
