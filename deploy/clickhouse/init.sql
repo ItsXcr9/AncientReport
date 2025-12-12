@@ -83,9 +83,10 @@ CREATE TABLE IF NOT EXISTS docker_containers (
     block_write_bytes UInt64,
     uptime_seconds UInt64,
     restart_count UInt32,
-    created_at DateTime
+    created_at DateTime,
+    hostname String DEFAULT ''
 ) ENGINE = MergeTree()
-ORDER BY (timestamp, container_id)
+ORDER BY (hostname, timestamp, container_id)
 TTL timestamp + INTERVAL 30 DAY;
 
 -- Application settings (key-value store)

@@ -363,10 +363,88 @@ def get_real_metrics() -> EbpfMetrics:
     )
 
 
+async def get_process_flows_from_clickhouse(hostname: str = None) -> List[ProcessFlow]:
+    """Get process flows from ClickHouse - aggregated from all servers."""
+    ch = get_clickhouse_client()
+    flows = []
+    
+    try:
+        # Query process_network_bandwidth metrics from ClickHouse
+        # Process name and bytes are stored in tags Map field
+        hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
+        
+        query = f"""
+        SELECT 
+            tags['process_name'] as process_name,
+            toInt64OrZero(tags['pid']) as pid,
+            toInt64OrZero(tags['bytes_sent']) as bytes_sent,
+            toInt64OrZero(tags['bytes_received']) as bytes_received,
+            toInt64OrZero(tags['sockets']) as sockets
+        FROM metrics
+        WHERE metric_name = 'process_network_bandwidth'
+          AND timestamp >= now() - INTERVAL 5 MINUTE
+          {hostname_filter}
+        ORDER BY bytes_sent + bytes_received DESC
+        LIMIT 50
+        """
+        
+        results = await ch.query(query)
+        
+        # Deduplicate by process name, keeping the latest
+        seen_names = set()
+        for row in results:
+            name = row[0] if row[0] else 'unknown'
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            
+            flows.append(ProcessFlow(
+                pid=int(row[1]) if row[1] else 0,
+                process_name=name,
+                bytes_sent=int(row[2]) if row[2] else 0,
+                bytes_received=int(row[3]) if row[3] else 0,
+                packets_sent=0,
+                packets_received=0,
+                active_flows=int(row[4]) if row[4] else 0,
+                container_id=None
+            ))
+        
+        logger.info(f"Retrieved {len(flows)} process flows from ClickHouse")
+        return flows
+        
+    except Exception as e:
+        logger.warning(f"Failed to get process flows from ClickHouse: {e}, falling back to local proc")
+        return get_real_process_flows()
+
+
 @router.get("/metrics")
-async def get_ebpf_metrics() -> EbpfMetrics:
-    """Get all eBPF metrics (TCP connections, flows, syscalls)."""
-    return get_real_metrics()
+async def get_ebpf_metrics(hostname: str = None) -> EbpfMetrics:
+    """Get all eBPF metrics (TCP connections, flows, syscalls).
+    
+    Args:
+        hostname: Optional filter to get metrics for a specific server
+    """
+    # Get process flows from ClickHouse (aggregated from all servers)
+    process_flows = await get_process_flows_from_clickhouse(hostname)
+    
+    # Get TCP connections from local /proc (or would need to aggregate from ClickHouse too)
+    tcp_connections = get_real_tcp_connections()
+    
+    # Syscall stats require eBPF, return empty for now
+    syscall_stats = []
+    
+    total_processes = get_total_process_count()
+    packet_drops = get_packet_drops()
+    
+    return EbpfMetrics(
+        tcp_connections=tcp_connections,
+        process_flows=process_flows,
+        syscall_stats=syscall_stats,
+        collection_time=datetime.utcnow().isoformat(),
+        total_processes=total_processes,
+        packet_drops=packet_drops
+    )
+
 
 
 @router.get("/tcp/connections")
