@@ -667,6 +667,7 @@ class ProcessBandwidth(BaseModel):
     total_bytes: int
     bytes_per_sec: float  # Calculated rate
     flows: int
+    hostname: Optional[str] = None  # For fleet-wide view
 
 class LatencyStats(BaseModel):
     """Latency percentiles in milliseconds"""
@@ -724,6 +725,7 @@ class ProcessHealth(BaseModel):
     open_fds: int
     threads: int
     socket_count: int
+    hostname: Optional[str] = None  # For fleet-wide view - hostname where process runs
 
 class SystemContext(BaseModel):
     """System-wide context indicators"""
@@ -2390,8 +2392,10 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                 # Query process_network_bandwidth metrics for per-process bandwidth
                 bandwidth_list = []
                 try:
+                    hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
                     bw_query = f"""
                     SELECT 
+                        hostname,
                         tags['process_name'] as process_name,
                         toUInt32(tags['pid']) as pid,
                         argMax(toUInt64(tags['bytes_sent']), timestamp) as bytes_sent,
@@ -2399,10 +2403,10 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                         argMax(value, timestamp) as total_bytes,
                         argMax(toUInt32(tags['sockets']), timestamp) as sockets
                     FROM metrics
-                    WHERE hostname = '{hostname}'
-                      AND timestamp >= now() - INTERVAL 10 MINUTE
+                    WHERE timestamp >= now() - INTERVAL 10 MINUTE
                       AND metric_name = 'process_network_bandwidth'
-                    GROUP BY process_name, pid
+                      {hostname_filter}
+                    GROUP BY hostname, process_name, pid
                     ORDER BY total_bytes DESC
                     LIMIT 20
                     """
@@ -2410,12 +2414,13 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                     logger.debug(f"process_network_bandwidth query returned {len(bw_result) if bw_result else 0} rows")
                     if bw_result:
                         for row in bw_result:
-                            proc_name = str(row[0]) if row[0] else 'unknown'
-                            proc_pid = int(row[1]) if row[1] else 0
-                            proc_sent = int(row[2]) if row[2] else 0
-                            proc_recv = int(row[3]) if row[3] else 0
-                            proc_total = int(row[4]) if row[4] else 0
-                            proc_sockets = int(row[5]) if row[5] else 0
+                            proc_hostname = str(row[0]) if row[0] else None
+                            proc_name = str(row[1]) if row[1] else 'unknown'
+                            proc_pid = int(row[2]) if row[2] else 0
+                            proc_sent = int(row[3]) if row[3] else 0
+                            proc_recv = int(row[4]) if row[4] else 0
+                            proc_total = int(row[5]) if row[5] else 0
+                            proc_sockets = int(row[6]) if row[6] else 0
                             
                             bandwidth_list.append(ProcessBandwidth(
                                 process_name=proc_name,
@@ -2424,7 +2429,8 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                                 bytes_received=proc_recv,
                                 total_bytes=proc_total,
                                 bytes_per_sec=0,
-                                flows=proc_sockets
+                                flows=proc_sockets,
+                                hostname=proc_hostname
                             ))
                 except Exception as e:
                     logger.warning(f"Failed to query process_network_bandwidth: {e}")
@@ -2606,6 +2612,7 @@ async def get_context(hostname: Optional[str] = Query(None, description="Filter 
             # Query top CPU processes from ClickHouse
             cpu_query = f"""
             SELECT 
+                hostname,
                 tags['process_name'] as process_name,
                 toInt32OrZero(tags['pid']) as pid,
                 argMax(value, timestamp) as cpu_percent,
@@ -2618,7 +2625,7 @@ async def get_context(hostname: Optional[str] = Query(None, description="Filter 
             WHERE timestamp >= now() - INTERVAL 10 MINUTE
               AND metric_name = 'process_cpu_usage'
               {hostname_filter}
-            GROUP BY process_name, pid, socket_count
+            GROUP BY hostname, process_name, pid, socket_count
             ORDER BY cpu_percent DESC
             LIMIT 10
             """
@@ -2626,21 +2633,23 @@ async def get_context(hostname: Optional[str] = Query(None, description="Filter 
             
             top_cpu = []
             for row in cpu_result:
-                if row[0]:  # Has process name
+                if row[1]:  # Has process name (now at index 1)
                     top_cpu.append(ProcessHealth(
-                        process_name=str(row[0]),
-                        pid=int(row[1]) if row[1] else 0,
-                        cpu_percent=round(float(row[2]) if row[2] else 0, 1),
-                        memory_mb=0,  # Will query separately
+                        process_name=str(row[1]),
+                        pid=int(row[2]) if row[2] else 0,
+                        cpu_percent=round(float(row[3]) if row[3] else 0, 1),
+                        memory_mb=0,
                         memory_percent=0,
                         open_fds=0,
                         threads=0,
-                        socket_count=int(row[7]) if row[7] else 0
+                        socket_count=int(row[7]) if len(row) > 7 and row[7] else 0,
+                        hostname=str(row[0]) if row[0] else None
                     ))
             
             # Query top memory processes
             mem_query = f"""
             SELECT 
+                hostname,
                 tags['process_name'] as process_name,
                 toInt32OrZero(tags['pid']) as pid,
                 argMax(value, timestamp) as memory_mb,
@@ -2653,7 +2662,7 @@ async def get_context(hostname: Optional[str] = Query(None, description="Filter 
             WHERE timestamp >= now() - INTERVAL 10 MINUTE
               AND metric_name = 'process_memory_mb'
               {hostname_filter}
-            GROUP BY process_name, pid, socket_count
+            GROUP BY hostname, process_name, pid, socket_count
             ORDER BY memory_mb DESC
             LIMIT 10
             """
@@ -2661,16 +2670,17 @@ async def get_context(hostname: Optional[str] = Query(None, description="Filter 
             
             top_memory = []
             for row in mem_result:
-                if row[0]:
+                if row[1]:  # process_name at index 1
                     top_memory.append(ProcessHealth(
-                        process_name=str(row[0]),
-                        pid=int(row[1]) if row[1] else 0,
+                        process_name=str(row[1]),
+                        pid=int(row[2]) if row[2] else 0,
                         cpu_percent=0,
-                        memory_mb=round(float(row[2]) if row[2] else 0, 1),
+                        memory_mb=round(float(row[3]) if row[3] else 0, 1),
                         memory_percent=0,
                         open_fds=0,
                         threads=0,
-                        socket_count=int(row[7]) if row[7] else 0
+                        socket_count=int(row[8]) if len(row) > 8 and row[8] else 0,
+                        hostname=str(row[0]) if row[0] else None
                     ))
             
             # Query system metrics
