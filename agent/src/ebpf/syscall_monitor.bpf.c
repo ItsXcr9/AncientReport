@@ -15,6 +15,8 @@
 #define MAX_ARGS 6
 
 // Syscall types we track
+#define SYSCALL_READ        0
+#define SYSCALL_WRITE       1
 #define SYSCALL_EXECVE      59
 #define SYSCALL_CONNECT     42
 #define SYSCALL_OPEN        2
@@ -24,6 +26,9 @@
 #define SYSCALL_CLONE       56
 #define SYSCALL_FORK        57
 #define SYSCALL_PTRACE      101
+#define SYSCALL_POLL        7
+#define SYSCALL_RECVMSG     47
+#define SYSCALL_SENDMSG     46
 
 // Syscall event for userspace
 struct syscall_event {
@@ -42,6 +47,11 @@ struct syscall_event {
 
 // Per-process syscall counts
 struct syscall_count {
+    __u64 read_count;
+    __u64 write_count;
+    __u64 sendmsg_count;
+    __u64 recvmsg_count;
+    __u64 poll_count;
     __u64 execve_count;
     __u64 connect_count;
     __u64 open_count;
@@ -129,6 +139,11 @@ static __always_inline void update_syscall_count(__u32 syscall_nr) {
         new_count.last_activity = bpf_ktime_get_ns();
         
         switch (syscall_nr) {
+            case SYSCALL_READ: new_count.read_count = 1; break;
+            case SYSCALL_WRITE: new_count.write_count = 1; break;
+            case SYSCALL_SENDMSG: new_count.sendmsg_count = 1; break;
+            case SYSCALL_RECVMSG: new_count.recvmsg_count = 1; break;
+            case SYSCALL_POLL: new_count.poll_count = 1; break;
             case SYSCALL_EXECVE: new_count.execve_count = 1; break;
             case SYSCALL_CONNECT: new_count.connect_count = 1; break;
             case SYSCALL_OPEN:
@@ -144,6 +159,21 @@ static __always_inline void update_syscall_count(__u32 syscall_nr) {
         count->last_activity = bpf_ktime_get_ns();
         
         switch (syscall_nr) {
+            case SYSCALL_READ: 
+                __sync_fetch_and_add(&count->read_count, 1); 
+                break;
+            case SYSCALL_WRITE: 
+                __sync_fetch_and_add(&count->write_count, 1); 
+                break;
+            case SYSCALL_SENDMSG: 
+                __sync_fetch_and_add(&count->sendmsg_count, 1); 
+                break;
+            case SYSCALL_RECVMSG: 
+                __sync_fetch_and_add(&count->recvmsg_count, 1); 
+                break;
+            case SYSCALL_POLL: 
+                __sync_fetch_and_add(&count->poll_count, 1); 
+                break;
             case SYSCALL_EXECVE: 
                 __sync_fetch_and_add(&count->execve_count, 1); 
                 break;
@@ -281,4 +311,46 @@ int trace_clone_enter(struct trace_event_raw_sys_enter *ctx) {
     return 0;
 }
 
+// Track read syscalls - disk I/O
+SEC("tracepoint/syscalls/sys_enter_read")
+int trace_read_enter(struct trace_event_raw_sys_enter *ctx) {
+    update_syscall_count(SYSCALL_READ);
+    return 0;
+}
+
+// Track write syscalls - disk I/O
+SEC("tracepoint/syscalls/sys_enter_write")
+int trace_write_enter(struct trace_event_raw_sys_enter *ctx) {
+    update_syscall_count(SYSCALL_WRITE);
+    return 0;
+}
+
+// Track sendmsg syscalls - network send
+SEC("tracepoint/syscalls/sys_enter_sendmsg")
+int trace_sendmsg_enter(struct trace_event_raw_sys_enter *ctx) {
+    update_syscall_count(SYSCALL_SENDMSG);
+    return 0;
+}
+
+// Track recvmsg syscalls - network receive
+SEC("tracepoint/syscalls/sys_enter_recvmsg")
+int trace_recvmsg_enter(struct trace_event_raw_sys_enter *ctx) {
+    update_syscall_count(SYSCALL_RECVMSG);
+    return 0;
+}
+
+// Track poll/epoll syscalls - I/O multiplexing
+SEC("tracepoint/syscalls/sys_enter_poll")
+int trace_poll_enter(struct trace_event_raw_sys_enter *ctx) {
+    update_syscall_count(SYSCALL_POLL);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_epoll_wait")
+int trace_epoll_wait_enter(struct trace_event_raw_sys_enter *ctx) {
+    update_syscall_count(SYSCALL_POLL);
+    return 0;
+}
+
 char LICENSE[] SEC("license") = "GPL";
+

@@ -3063,33 +3063,66 @@ async def get_process_drilldown_endpoint(
         bytes_recv = int(net_list[0][1]) if net_list and len(net_list[0]) > 1 and net_list[0][1] else 0
         sockets = int(net_list[0][2]) if net_list and len(net_list[0]) > 2 and net_list[0][2] else 0
         
-        # Query disk I/O for syscall estimation
-        disk_query = f"""
-        SELECT argMax(value, timestamp) as disk_io_mb
+        # Query eBPF syscall metrics if available (preferred source)
+        ebpf_syscall_query = f"""
+        SELECT 
+            argMax(case when metric_name = 'ebpf_syscall_read_count' then value else 0 end, timestamp) as read_count,
+            argMax(case when metric_name = 'ebpf_syscall_write_count' then value else 0 end, timestamp) as write_count,
+            argMax(case when metric_name = 'ebpf_syscall_sendmsg_count' then value else 0 end, timestamp) as sendmsg_count,
+            argMax(case when metric_name = 'ebpf_syscall_recvmsg_count' then value else 0 end, timestamp) as recvmsg_count,
+            argMax(case when metric_name = 'ebpf_syscall_poll_count' then value else 0 end, timestamp) as poll_count
         FROM metrics
         WHERE hostname = '{hostname}'
           AND timestamp >= now() - INTERVAL 10 MINUTE
-          AND metric_name = 'process_disk_io_mb'
+          AND metric_name IN ('ebpf_syscall_read_count', 'ebpf_syscall_write_count', 'ebpf_syscall_sendmsg_count', 'ebpf_syscall_recvmsg_count', 'ebpf_syscall_poll_count')
           AND tags['pid'] = '{pid}'
         """
-        disk_result = await ch.query(disk_query)
-        disk_list = list(disk_result) if disk_result else []
-        disk_io_mb = float(disk_list[0][0]) if disk_list and disk_list[0][0] else 0.0
+        ebpf_result = await ch.query(ebpf_syscall_query)
+        ebpf_list = list(ebpf_result) if ebpf_result else []
         
-        # Estimate syscalls from network and disk I/O
-        # Average syscall size assumptions: 4KB for read/write, 1KB for send/recv
-        estimated_reads = int(disk_io_mb * 256) if disk_io_mb > 0 else 0  # MB to count (4KB each)
-        estimated_writes = int(disk_io_mb * 128) if disk_io_mb > 0 else 0  # Fewer writes typically
-        estimated_sends = int(bytes_sent / 1024) if bytes_sent > 0 else 0  # 1KB per send
-        estimated_recvs = int(bytes_recv / 1024) if bytes_recv > 0 else 0  # 1KB per recv
+        # Check if we got real eBPF data
+        has_ebpf_data = ebpf_list and len(ebpf_list) > 0 and any(val != 0 for val in ebpf_list[0] if val is not None)
         
-        syscalls = SyscallBreakdown(
-            read_count=estimated_reads,
-            write_count=estimated_writes,
-            sendmsg_count=estimated_sends,
-            recvmsg_count=estimated_recvs,
-            poll_epoll_count=max(sockets * 10, 1) if sockets > 0 else 0  # Estimate poll activity
-        )
+        if has_ebpf_data:
+            # Use actual eBPF-collected syscall counts
+            syscalls = SyscallBreakdown(
+                read_count=int(ebpf_list[0][0]) if ebpf_list[0][0] else 0,
+                write_count=int(ebpf_list[0][1]) if ebpf_list[0][1] else 0,
+                sendmsg_count=int(ebpf_list[0][2]) if ebpf_list[0][2] else 0,
+                recvmsg_count=int(ebpf_list[0][3]) if ebpf_list[0][3] else 0,
+                poll_epoll_count=int(ebpf_list[0][4]) if ebpf_list[0][4] else 0
+            )
+            logger.debug(f"Using eBPF syscall data for {hostname}:{pid}")
+        else:
+            # Fallback: estimate from network and disk I/O if no eBPF data
+            # Query disk I/O for syscall estimation
+            disk_query = f"""
+            SELECT argMax(value, timestamp) as disk_io_mb
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'process_disk_io_mb'
+              AND tags['pid'] = '{pid}'
+            """
+            disk_result = await ch.query(disk_query)
+            disk_list = list(disk_result) if disk_result else []
+            disk_io_mb = float(disk_list[0][0]) if disk_list and disk_list[0][0] else 0.0
+            
+            # Estimate syscalls from network and disk I/O
+            # Average syscall size assumptions: 4KB for read/write, 1KB for send/recv
+            estimated_reads = int(disk_io_mb * 256) if disk_io_mb > 0 else 0  # MB to count (4KB each)
+            estimated_writes = int(disk_io_mb * 128) if disk_io_mb > 0 else 0  # Fewer writes typically
+            estimated_sends = int(bytes_sent / 1024) if bytes_sent > 0 else 0  # 1KB per send
+            estimated_recvs = int(bytes_recv / 1024) if bytes_recv > 0 else 0  # 1KB per recv
+            
+            syscalls = SyscallBreakdown(
+                read_count=estimated_reads,
+                write_count=estimated_writes,
+                sendmsg_count=estimated_sends,
+                recvmsg_count=estimated_recvs,
+                poll_epoll_count=max(sockets * 10, 1) if sockets > 0 else 0  # Estimate poll activity
+            )
+            logger.debug(f"Using estimated syscall data for {hostname}:{pid}")
         
         # Query TCP flows for this process
         flows = []

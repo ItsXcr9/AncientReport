@@ -14,6 +14,23 @@ fn main() {
         return;
     }
 
+    // Build syscall monitoring eBPF program (for read/write/send/recv/poll tracking)
+    if let Err(e) = SkeletonBuilder::new()
+        .source(format!("{}/syscall_monitor.bpf.c", EBPF_SRC))
+        .build_and_generate(&out.join("syscall_monitor.skel.rs"))
+    {
+        eprintln!("Warning: Failed to build syscall_monitor eBPF program: {}", e);
+        eprintln!("eBPF syscall tracing will be disabled.");
+    }
+
+    // Build process flow eBPF program (for per-process network tracking)
+    if let Err(e) = SkeletonBuilder::new()
+        .source(format!("{}/process_flow.bpf.c", EBPF_SRC))
+        .build_and_generate(&out.join("process_flow.skel.rs"))
+    {
+        eprintln!("Warning: Failed to build process_flow eBPF program: {}", e);
+    }
+
     // Build network monitoring eBPF program
     if let Err(e) = SkeletonBuilder::new()
         .source(format!("{}/network.bpf.c", EBPF_SRC))
@@ -35,6 +52,9 @@ fn main() {
     }
 
     // Tell Cargo to rerun this build script if eBPF sources change
+    println!("cargo:rerun-if-changed={}/syscall_monitor.bpf.c", EBPF_SRC);
+    println!("cargo:rerun-if-changed={}/process_flow.bpf.c", EBPF_SRC);
     println!("cargo:rerun-if-changed={}/network.bpf.c", EBPF_SRC);
     println!("cargo:rerun-if-changed={}/diskio.bpf.c", EBPF_SRC);
 }
+
