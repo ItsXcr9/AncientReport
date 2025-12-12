@@ -67,6 +67,15 @@ app.include_router(sec_scan_api.router, tags=["V3 Security Scanning"])
 app.include_router(ai_chat_api.router, tags=["V3 AI Chat"])
 app.include_router(remediation_api.router, tags=["V3 Auto-Remediation"])
 
+# Import and register metrics API (History Charts)
+# NOTE: The metrics_api router is NOT registered here because main.py already defines
+# /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
+# The api/metrics.py has wrong metric names (memory_used_percent vs memory_usage_percent) 
+# and wrong response format (bare list vs {"data": [...]}), which broke CPU, Memory, Network charts.
+# Keeping the import for metrics_api.set_clickhouse_client() call in startup_event.
+from api import metrics as metrics_api
+# app.include_router(metrics_api.router, prefix="/api/metrics", tags=["System Metrics"])
+
 # Import and register realtime WebSocket router
 from api import realtime
 app.include_router(realtime.router, tags=["realtime"])
@@ -285,6 +294,7 @@ async def startup_event():
     containers.set_clickhouse_client(clickhouse_client)
     healthchecks.set_clickhouse_client(clickhouse_client)
     ebpf_api.set_clickhouse_client(clickhouse_client)
+    metrics_api.set_clickhouse_client(clickhouse_client)
     
     # Initialize ClickHouse tables for network metrics
     await ebpf_api.ensure_network_metrics_tables()
@@ -793,7 +803,11 @@ async def get_daily_report(date: str):
 async def trigger_hourly_analysis(hostname: str = None):
     """Manually trigger an hourly analysis"""
     try:
-        await run_hourly_analysis(hostname)
+        # Convert 'all' to None for correct filtering in analyzer
+        target_hostname = None if hostname == "all" else hostname
+        
+        await run_hourly_analysis(target_hostname)
+        
         # Get the report that was just generated
         key = hostname if hostname else "all"
         report = latest_reports.get(key)

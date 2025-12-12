@@ -1,4 +1,5 @@
 
+import { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { NetworkMetricsPanel } from '../components/NetworkMetricsPanel';
 import { DockerContainers } from '../components/DockerContainers';
@@ -19,6 +20,7 @@ interface InfrastructureProps {
 
 export default function Infrastructure() {
   const { selectedServer, config, servers } = useOutletContext<InfrastructureProps>();
+  const [timeRange, setTimeRange] = useState<'1h' | '6h' | '24h' | '7d'>('24h');
 
   return (
     <div className="space-y-8">
@@ -59,43 +61,60 @@ export default function Infrastructure() {
         </div>
       </div>
 
-      {/* Metrics History Charts */}
-      {(selectedServer || config.features.metricsHistory.showForAllServers) && (
-        <div className="mt-8">
-          <h2 className="text-2xl font-semibold mb-4">Metrics History</h2>
+      {/* Metrics History Charts - Now always visible with time range selector */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-semibold">Metrics History</h2>
           
-          {selectedServer ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <CPUChart timeRange="1h" hostname={selectedServer} />
-              <MemoryChart timeRange="1h" hostname={selectedServer} />
-              <DiskIOChart timeRange="1h" hostname={selectedServer} />
-              <NetworkChart timeRange="1h" hostname={selectedServer} />
-            </div>
-          ) : (
-            <div className="space-y-12">
-              {servers.map(server => (
-                <div key={server} className="glass-card rounded-xl p-6">
-                  <h3 className="text-xl font-medium mb-4 flex items-center gap-2 text-blue-300">
-                    <Server className="w-5 h-5" />
-                    {server}
-                  </h3>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <CPUChart timeRange="1h" hostname={server} />
-                    <MemoryChart timeRange="1h" hostname={server} />
-                    <DiskIOChart timeRange="1h" hostname={server} />
-                    <NetworkChart timeRange="1h" hostname={server} />
-                  </div>
-                </div>
-              ))}
-              {servers.length === 0 && (
-                <div className="text-center text-gray-400 py-8">
-                  No active servers found.
-                </div>
-              )}
-            </div>
-          )}
+          {/* Time Range Selector */}
+          <div className="bg-white/5 backdrop-blur-sm rounded-lg p-1 border border-white/10 flex">
+            {(['1h', '6h', '24h', '7d'] as const).map((range) => (
+              <button
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${
+                  timeRange === range 
+                    ? 'bg-blue-500/80 text-white shadow-sm' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+        
+        {selectedServer ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <CPUChart timeRange={timeRange} hostname={selectedServer} />
+            <MemoryChart timeRange={timeRange} hostname={selectedServer} />
+            <DiskIOChart timeRange={timeRange} hostname={selectedServer} />
+            <NetworkChart timeRange={timeRange} hostname={selectedServer} />
+          </div>
+        ) : (
+          <div className="space-y-12">
+            {servers.map(server => (
+              <div key={server} className="glass-card rounded-xl p-6">
+                <h3 className="text-xl font-medium mb-4 flex items-center gap-2 text-blue-300">
+                  <Server className="w-5 h-5" />
+                  {server}
+                </h3>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <CPUChart timeRange={timeRange} hostname={server} />
+                  <MemoryChart timeRange={timeRange} hostname={server} />
+                  <DiskIOChart timeRange={timeRange} hostname={server} />
+                  <NetworkChart timeRange={timeRange} hostname={server} />
+                </div>
+              </div>
+            ))}
+            {servers.length === 0 && (
+              <div className="text-center text-gray-400 py-8">
+                No active servers found.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -65,10 +65,16 @@ export default function DashboardHome() {
         </button>
       </div>
 
-       {/* Server Info Card */}
-       {selectedServer && (
+       {/* Server Info Cards */}
+       {selectedServer ? (
           <div className="mb-6">
             <ServerInfoCard selectedServer={selectedServer} />
+          </div>
+        ) : (
+          <div className="mb-6 grid grid-cols-1 gap-6">
+            {servers.map((server) => (
+              <ServerInfoCard key={server} selectedServer={server} />
+            ))}
           </div>
         )}
 

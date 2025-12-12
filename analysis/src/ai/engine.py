@@ -28,7 +28,12 @@ class AIEngine:
             self.model = model or "gpt-4"
             
         elif self.provider == "google":
-            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                logger.warning("No GEMINI_API_KEY or GOOGLE_API_KEY found, attempting Application Default Credentials")
+            else:
+                genai.configure(api_key=api_key)
+                
             self.client = genai.GenerativeModel(model or "gemini-2.5-flash-lite")
             self.model = model or "gemini-2.5-flash-lite"
             

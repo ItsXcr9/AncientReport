@@ -1238,7 +1238,8 @@ async def get_metrics_from_clickhouse(
               AND metric_name IN ('network_drops', 'network_bytes_sent', 'network_bytes_received', 
                                   'network_packets_sent', 'network_packets_received',
                                   'network_connection_open_rate', 'network_connection_close_rate', 
-                                  'network_latency_p50', 'network_active_connections', 'network_active_connections_detailed', 'network_established',
+                                  'network_latency_p50', 'network_latency_p90', 'network_latency_p99',
+                                  'network_active_connections', 'network_active_connections_detailed', 'network_established',
                                   'network_time_wait', 'network_close_wait', 'network_retransmits',
                                   'softirq_net_percent', 'cpu_system_percent', 'socket_queue_pressure',
                                   'disk_reads_per_sec', 'disk_writes_per_sec', 'disk_latency_ms', 'disk_usage_percent')
@@ -2056,6 +2057,166 @@ def get_connection_stats() -> ConnectionStats:
     )
 
 
+async def get_connection_stats_from_clickhouse(hostname: Optional[str] = None) -> ConnectionStats:
+    """
+    Get connection statistics from ClickHouse database.
+    
+    This fetches real data from agents instead of the analysis container's local /proc.
+    
+    Args:
+        hostname: If provided, get stats for that specific server.
+                  If None, aggregate across all servers.
+    """
+    ch = get_clickhouse_client()
+    if not ch:
+        logger.warning("ClickHouse client not available, falling back to local /proc")
+        return get_connection_stats()
+    
+    try:
+        # Build the hostname filter
+        hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
+        
+        # Query the latest connection stats from all servers (or specific one)
+        # Using a simple approach: get latest value per metric per host, then sum
+        query = f"""
+        SELECT 
+            sum(latest_value) as total
+        FROM (
+            SELECT 
+                hostname,
+                metric_name,
+                argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_established'
+              {hostname_filter}
+            GROUP BY hostname, metric_name
+        )
+        """
+        established_result = await ch.query(query)
+        established = int(established_result[0][0]) if established_result and established_result[0][0] else 0
+        
+        query = f"""
+        SELECT sum(latest_value) as total
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_time_wait'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        time_wait_result = await ch.query(query)
+        time_wait = int(time_wait_result[0][0]) if time_wait_result and time_wait_result[0][0] else 0
+        
+        query = f"""
+        SELECT sum(latest_value) as total
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_close_wait'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        close_wait_result = await ch.query(query)
+        close_wait = int(close_wait_result[0][0]) if close_wait_result and close_wait_result[0][0] else 0
+        
+        query = f"""
+        SELECT sum(latest_value) as total
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_active_connections'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        active_result = await ch.query(query)
+        active = int(active_result[0][0]) if active_result and active_result[0][0] else 0
+        
+        query = f"""
+        SELECT sum(latest_value) as total
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_retransmits'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        retransmits_result = await ch.query(query)
+        retransmits = int(retransmits_result[0][0]) if retransmits_result and retransmits_result[0][0] else 0
+        
+        query = f"""
+        SELECT sum(latest_value) as total
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_drops'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        drops_result = await ch.query(query)
+        drops = int(drops_result[0][0]) if drops_result and drops_result[0][0] else 0
+        
+        query = f"""
+        SELECT avg(latest_value) as avg_rate
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_connection_open_rate'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        open_rate_result = await ch.query(query)
+        open_rate = float(open_rate_result[0][0]) if open_rate_result and open_rate_result[0][0] else 0.0
+        
+        query = f"""
+        SELECT avg(latest_value) as avg_rate
+        FROM (
+            SELECT hostname, argMax(value, timestamp) as latest_value
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'network_connection_close_rate'
+              {hostname_filter}
+            GROUP BY hostname
+        )
+        """
+        close_rate_result = await ch.query(query)
+        close_rate = float(close_rate_result[0][0]) if close_rate_result and close_rate_result[0][0] else 0.0
+        
+        # Estimate active connections from established if not available
+        if active == 0 and established > 0:
+            active = established + time_wait
+        
+        logger.debug(f"ClickHouse connection stats: established={established}, time_wait={time_wait}, close_wait={close_wait}")
+        
+        return ConnectionStats(
+            active_connections=active,
+            established=established,
+            listen=0,  # Not tracked by agent currently
+            time_wait=time_wait,
+            close_wait=close_wait,
+            total_retransmits=retransmits,
+            packet_drops=drops,
+            open_rate_per_sec=open_rate,
+            close_rate_per_sec=close_rate
+        )
+            
+    except Exception as e:
+        logger.error(f"Failed to get connection stats from ClickHouse: {e}")
+        return get_connection_stats()
+
+
 def get_bandwidth_by_process() -> List[ProcessBandwidth]:
     """Get bandwidth usage per process, sorted by total bytes."""
     flows = get_real_process_flows()
@@ -2336,7 +2497,7 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
         timestamp=datetime.utcnow().isoformat(),
         bandwidth=get_bandwidth_by_process(),
         latency=get_network_latency_stats(),
-        connections=get_connection_stats(),
+        connections=await get_connection_stats_from_clickhouse(),
         top_flows=get_flow_edges()
     )
 
@@ -2356,7 +2517,7 @@ async def get_latency(hostname: Optional[str] = Query(None)) -> LatencyStats:
 @router.get("/network/connections", response_model=ConnectionStats)
 async def get_connections(hostname: Optional[str] = Query(None)) -> ConnectionStats:
     """Get connection statistics: active connections, states, retransmits, drops."""
-    return get_connection_stats()
+    return await get_connection_stats_from_clickhouse(hostname)
 
 
 @router.get("/network/flows", response_model=List[FlowEdge])
@@ -2421,7 +2582,7 @@ async def trigger_collection():
 
 
 @router.get("/network/context", response_model=SystemContext)
-async def get_context() -> SystemContext:
+async def get_context(hostname: Optional[str] = Query(None, description="Filter by hostname for per-server data")) -> SystemContext:
     """
     Get system context indicators that explain WHY metrics change.
     
@@ -2430,7 +2591,129 @@ async def get_context() -> SystemContext:
     - SoftIRQ network usage (kernel pressure)
     - Socket queue depth (backlog saturation)
     - Top CPU and memory consuming network processes
+    
+    If hostname is provided, fetches data from ClickHouse (collected by remote agents).
+    Otherwise, returns local analysis container data.
     """
+    # If no hostname specified and no ClickHouse data, fall back to local
+    ch = get_clickhouse_client()
+    
+    if ch:
+        try:
+            # Build hostname filter
+            hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
+            
+            # Query top CPU processes from ClickHouse
+            cpu_query = f"""
+            SELECT 
+                tags['process_name'] as process_name,
+                toInt32OrZero(tags['pid']) as pid,
+                argMax(value, timestamp) as cpu_percent,
+                0 as memory_mb,
+                0 as memory_percent,
+                0 as open_fds,
+                0 as threads,
+                toInt32OrZero(tags['sockets']) as socket_count
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'process_cpu_usage'
+              {hostname_filter}
+            GROUP BY process_name, pid, socket_count
+            ORDER BY cpu_percent DESC
+            LIMIT 10
+            """
+            cpu_result = await ch.query(cpu_query)
+            
+            top_cpu = []
+            for row in cpu_result:
+                if row[0]:  # Has process name
+                    top_cpu.append(ProcessHealth(
+                        process_name=str(row[0]),
+                        pid=int(row[1]) if row[1] else 0,
+                        cpu_percent=round(float(row[2]) if row[2] else 0, 1),
+                        memory_mb=0,  # Will query separately
+                        memory_percent=0,
+                        open_fds=0,
+                        threads=0,
+                        socket_count=int(row[7]) if row[7] else 0
+                    ))
+            
+            # Query top memory processes
+            mem_query = f"""
+            SELECT 
+                tags['process_name'] as process_name,
+                toInt32OrZero(tags['pid']) as pid,
+                argMax(value, timestamp) as memory_mb,
+                0 as cpu_percent,
+                0 as memory_percent,
+                0 as open_fds,
+                0 as threads,
+                toInt32OrZero(tags['sockets']) as socket_count
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name = 'process_memory_mb'
+              {hostname_filter}
+            GROUP BY process_name, pid, socket_count
+            ORDER BY memory_mb DESC
+            LIMIT 10
+            """
+            mem_result = await ch.query(mem_query)
+            
+            top_memory = []
+            for row in mem_result:
+                if row[0]:
+                    top_memory.append(ProcessHealth(
+                        process_name=str(row[0]),
+                        pid=int(row[1]) if row[1] else 0,
+                        cpu_percent=0,
+                        memory_mb=round(float(row[2]) if row[2] else 0, 1),
+                        memory_percent=0,
+                        open_fds=0,
+                        threads=0,
+                        socket_count=int(row[7]) if row[7] else 0
+                    ))
+            
+            # Query system metrics
+            sys_query = f"""
+            SELECT 
+                argMax(CASE WHEN metric_name = 'softirq_net_percent' THEN value ELSE NULL END, timestamp) as softirq,
+                argMax(CASE WHEN metric_name = 'cpu_system_percent' THEN value ELSE NULL END, timestamp) as cpu_sys,
+                argMax(CASE WHEN metric_name = 'memory_usage_percent' THEN value ELSE NULL END, timestamp) as mem_used
+            FROM metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+              AND metric_name IN ('softirq_net_percent', 'cpu_system_percent', 'memory_usage_percent')
+              {hostname_filter}
+            """
+            sys_result = await ch.query(sys_query)
+            
+            softirq = 0.0
+            cpu_sys = 0.0
+            mem_used = 0.0
+            if sys_result and len(sys_result) > 0:
+                row = sys_result[0]
+                softirq = float(row[0]) if row[0] else 0.0
+                cpu_sys = float(row[1]) if row[1] else 0.0
+                mem_used = float(row[2]) if row[2] else 0.0
+            
+            if top_cpu or top_memory:
+                logger.debug(f"Returning context from ClickHouse: {len(top_cpu)} CPU procs, {len(top_memory)} mem procs")
+                return SystemContext(
+                    memory_used_percent=round(mem_used, 1),
+                    memory_available_mb=0,  # Not stored by agent
+                    oom_risk=mem_used > 90,
+                    swap_used_percent=0,
+                    softirq_net_percent=round(softirq, 1),
+                    cpu_system_percent=round(cpu_sys, 1),
+                    avg_socket_queue_depth=0,
+                    max_socket_queue_depth=0,
+                    socket_backlog_pressure=0,
+                    top_cpu_processes=top_cpu[:5],
+                    top_memory_processes=top_memory[:5]
+                )
+        except Exception as e:
+            logger.warning(f"Failed to get context from ClickHouse: {e}, falling back to local")
+    
+    # Fallback to local /proc data
     return get_system_context()
 
 

@@ -319,8 +319,8 @@ class IngestionGateway:
                 await self.clickhouse.insert('metrics', generic_metrics_rows)
                 
             if network_metrics_rows:
-                logger.info(f"Inserting {len(network_metrics_rows)} rows to 'network_metrics_ts' table...")
-                await self.clickhouse.insert('network_metrics_ts', network_metrics_rows)
+                logger.info(f"Skipping {len(network_metrics_rows)} rows to 'network_metrics_ts' table due to schema mismatch...")
+                # await self.clickhouse.insert('network_metrics_ts', network_metrics_rows)
                 
             if anomaly_rows:
                 logger.info(f"Inserting {len(anomaly_rows)} rows to 'network_anomalies' table...")

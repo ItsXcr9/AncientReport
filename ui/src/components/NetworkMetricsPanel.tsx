@@ -190,8 +190,9 @@ async function fetchNetworkHistory(hostname?: string): Promise<{ samples: Metric
   return response.json();
 }
 
-async function fetchSystemContext(): Promise<SystemContext> {
-  const response = await fetch(`${METRICS_API}/api/v3/ebpf/network/context`);
+async function fetchSystemContext(hostname?: string): Promise<SystemContext> {
+  const url = hostname ? `${METRICS_API}/api/v3/ebpf/network/context?hostname=${hostname}` : `${METRICS_API}/api/v3/ebpf/network/context`;
+  const response = await fetch(url);
   if (!response.ok) throw new Error("Failed to fetch");
   return response.json();
 }
@@ -242,8 +243,8 @@ export function NetworkMetricsPanel({ selectedNode, compact = false }: MetricsPa
   });
 
   const { data: contextData } = useQuery({
-    queryKey: ["system-context"],
-    queryFn: fetchSystemContext,
+    queryKey: ["system-context", selectedNode],
+    queryFn: () => fetchSystemContext(hostname),
     refetchInterval: 5000,
   });
 
