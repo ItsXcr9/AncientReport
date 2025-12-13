@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Database, MessageSquare, AlertTriangle, CheckCircle, XCircle, RefreshCw, Clock, Server, Activity, HardDrive, Users, Zap } from 'lucide-react';
+import { Database, MessageSquare, AlertTriangle, CheckCircle, XCircle, RefreshCw, Clock, Server, Activity, HardDrive, Users, Zap, Globe, Layers } from 'lucide-react';
 
 interface ContainerAppsProps {
   selectedServer: string | null;
@@ -27,13 +27,37 @@ interface DetectedContainers {
   kafka: Array<{ hostname: string; container_name: string; container_id: string }>;
   redis: Array<{ hostname: string; container_name: string; container_id: string }>;
   postgres: Array<{ hostname: string; container_name: string; container_id: string }>;
+  nginx: Array<{ hostname: string; container_name: string; container_id: string }>;
+  mongo: Array<{ hostname: string; container_name: string; container_id: string }>;
+  clickhouse: Array<{ hostname: string; container_name: string; container_id: string }>;
   total: number;
+}
+
+interface NginxHealth {
+  status: string;
+  issues: string[];
+  instances: Record<string, { hostname: string; metrics: Record<string, number> }>;
+}
+
+interface MongoHealth {
+  status: string;
+  issues: string[];
+  instances: Record<string, { hostname: string; metrics: Record<string, number> }>;
+}
+
+interface ClickHouseHealth {
+  status: string;
+  issues: string[];
+  instances: Record<string, { hostname: string; metrics: Record<string, number> }>;
 }
 
 export const ContainerApps: React.FC<ContainerAppsProps> = ({ selectedServer }) => {
   const [kafkaHealth, setKafkaHealth] = useState<KafkaHealth | null>(null);
   const [redisHealth, setRedisHealth] = useState<RedisHealth | null>(null);
   const [postgresHealth, setPostgresHealth] = useState<PostgresHealth | null>(null);
+  const [nginxHealth, setNginxHealth] = useState<NginxHealth | null>(null);
+  const [mongoHealth, setMongoHealth] = useState<MongoHealth | null>(null);
+  const [clickhouseHealth, setClickhouseHealth] = useState<ClickHouseHealth | null>(null);
   const [detected, setDetected] = useState<DetectedContainers | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
@@ -42,17 +66,34 @@ export const ContainerApps: React.FC<ContainerAppsProps> = ({ selectedServer }) 
     try {
       const hostnameParam = selectedServer ? `?hostname=${encodeURIComponent(selectedServer)}` : '';
       
-      const [detectedRes, kafkaRes, redisRes, postgresRes] = await Promise.all([
+      const [detectedRes, kafkaRes, redisRes, postgresRes, nginxRes, mongoRes, clickhouseRes] = await Promise.all([
         fetch(`/api/container-apps/detected${hostnameParam}`),
         fetch(`/api/container-apps/kafka/health${hostnameParam}`),
         fetch(`/api/container-apps/redis/health${hostnameParam}`),
-        fetch(`/api/container-apps/postgres/health${hostnameParam}`)
+        fetch(`/api/container-apps/postgres/health${hostnameParam}`),
+        fetch(`/api/container-apps/nginx/health${hostnameParam}`),
+        fetch(`/api/container-apps/mongo/health${hostnameParam}`),
+        fetch(`/api/container-apps/clickhouse/health${hostnameParam}`)
       ]);
 
-      if (detectedRes.ok) setDetected(await detectedRes.json());
+      if (detectedRes.ok) {
+        const detectedData = await detectedRes.json();
+        setDetected({
+          kafka: detectedData.containers?.kafka || [],
+          redis: detectedData.containers?.redis || [],
+          postgres: detectedData.containers?.postgres || [],
+          nginx: detectedData.containers?.nginx || [],
+          mongo: detectedData.containers?.mongo || [],
+          clickhouse: detectedData.containers?.clickhouse || [],
+          total: detectedData.total || 0
+        });
+      }
       if (kafkaRes.ok) setKafkaHealth(await kafkaRes.json());
       if (redisRes.ok) setRedisHealth(await redisRes.json());
       if (postgresRes.ok) setPostgresHealth(await postgresRes.json());
+      if (nginxRes.ok) setNginxHealth(await nginxRes.json());
+      if (mongoRes.ok) setMongoHealth(await mongoRes.json());
+      if (clickhouseRes.ok) setClickhouseHealth(await clickhouseRes.json());
       
       setLastUpdated(new Date());
     } catch (err) {
@@ -98,7 +139,10 @@ export const ContainerApps: React.FC<ContainerAppsProps> = ({ selectedServer }) 
   const hasKafka = detected?.kafka && detected.kafka.length > 0;
   const hasRedis = detected?.redis && detected.redis.length > 0;
   const hasPostgres = detected?.postgres && detected.postgres.length > 0;
-  const hasAnyApps = hasKafka || hasRedis || hasPostgres;
+  const hasNginx = detected?.nginx && detected.nginx.length > 0;
+  const hasMongo = detected?.mongo && detected.mongo.length > 0;
+  const hasClickhouse = detected?.clickhouse && detected.clickhouse.length > 0;
+  const hasAnyApps = hasKafka || hasRedis || hasPostgres || hasNginx || hasMongo || hasClickhouse;
 
   if (loading) {
     return (
@@ -119,7 +163,7 @@ export const ContainerApps: React.FC<ContainerAppsProps> = ({ selectedServer }) 
         <Database className="w-12 h-12 text-gray-500 mx-auto mb-3" />
         <h3 className="text-lg font-medium text-gray-300 mb-2">No Application Containers Detected</h3>
         <p className="text-sm text-gray-500">
-          Kafka, Redis, and PostgreSQL containers will appear here once detected.
+          Kafka, Redis, PostgreSQL, NGINX, MongoDB, and ClickHouse containers will appear here once detected.
         </p>
       </div>
     );
@@ -150,7 +194,7 @@ export const ContainerApps: React.FC<ContainerAppsProps> = ({ selectedServer }) 
       </div>
 
       {/* App Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         
         {/* Kafka Card */}
         <div className={`rounded-xl border p-5 transition-all ${
@@ -355,6 +399,132 @@ export const ContainerApps: React.FC<ContainerAppsProps> = ({ selectedServer }) 
           {!hasPostgres && (
             <p className="text-sm text-gray-500 italic">No PostgreSQL containers</p>
           )}
+        </div>
+
+        {/* NGINX Card */}
+        <div className={`rounded-xl border p-5 transition-all ${
+          hasNginx ? getStatusBg(nginxHealth?.status || 'unknown') : 'border-gray-700/50 bg-gray-800/20 opacity-50'
+        }`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-500/20 rounded-lg">
+                <Globe className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white">NGINX</h3>
+                <p className="text-xs text-gray-400">
+                  {detected?.nginx?.length || 0} instance{(detected?.nginx?.length || 0) !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+            {hasNginx && getStatusIcon(nginxHealth?.status || 'unknown')}
+          </div>
+          
+          {hasNginx && nginxHealth && (
+            <div className="space-y-2">
+              {Object.entries(nginxHealth.instances || {}).slice(0, 2).map(([instance, data]) => (
+                <div key={instance} className="text-sm">
+                  <div className="text-gray-400 truncate mb-1">{instance}</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-gray-500">Active:</span>
+                      <span className="ml-1 text-green-400">{data.metrics?.active_connections || 0}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Waiting:</span>
+                      <span className="ml-1 text-gray-300">{data.metrics?.waiting || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {!hasNginx && <p className="text-sm text-gray-500 italic">No NGINX containers</p>}
+        </div>
+
+        {/* MongoDB Card */}
+        <div className={`rounded-xl border p-5 transition-all ${
+          hasMongo ? getStatusBg(mongoHealth?.status || 'unknown') : 'border-gray-700/50 bg-gray-800/20 opacity-50'
+        }`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-500/20 rounded-lg">
+                <Layers className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white">MongoDB</h3>
+                <p className="text-xs text-gray-400">
+                  {detected?.mongo?.length || 0} instance{(detected?.mongo?.length || 0) !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+            {hasMongo && getStatusIcon(mongoHealth?.status || 'unknown')}
+          </div>
+          
+          {hasMongo && mongoHealth && (
+            <div className="space-y-2">
+              {Object.entries(mongoHealth.instances || {}).slice(0, 2).map(([instance, data]) => (
+                <div key={instance} className="text-sm">
+                  <div className="text-gray-400 truncate mb-1">{instance}</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-gray-500">Conns:</span>
+                      <span className="ml-1 text-green-400">{data.metrics?.connections_current || 0}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Ops:</span>
+                      <span className="ml-1 text-gray-300">{(data.metrics?.opcounters_query || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {!hasMongo && <p className="text-sm text-gray-500 italic">No MongoDB containers</p>}
+        </div>
+
+        {/* ClickHouse Card */}
+        <div className={`rounded-xl border p-5 transition-all ${
+          hasClickhouse ? getStatusBg(clickhouseHealth?.status || 'unknown') : 'border-gray-700/50 bg-gray-800/20 opacity-50'
+        }`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-yellow-500/20 rounded-lg">
+                <Zap className="w-5 h-5 text-yellow-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white">ClickHouse</h3>
+                <p className="text-xs text-gray-400">
+                  {detected?.clickhouse?.length || 0} instance{(detected?.clickhouse?.length || 0) !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+            {hasClickhouse && getStatusIcon(clickhouseHealth?.status || 'unknown')}
+          </div>
+          
+          {hasClickhouse && clickhouseHealth && (
+            <div className="space-y-2">
+              {Object.entries(clickhouseHealth.instances || {}).slice(0, 2).map(([instance, data]) => (
+                <div key={instance} className="text-sm">
+                  <div className="text-gray-400 truncate mb-1">{instance}</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-gray-500">Queries:</span>
+                      <span className="ml-1 text-green-400">{data.metrics?.running_queries || 0}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Parts:</span>
+                      <span className="ml-1 text-gray-300">{data.metrics?.parts_active || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {!hasClickhouse && <p className="text-sm text-gray-500 italic">No ClickHouse containers</p>}
         </div>
       </div>
     </div>

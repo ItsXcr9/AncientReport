@@ -516,10 +516,10 @@ async def get_postgres_health(hostname: Optional[str] = Query(None)):
 
 @router.get("/detected")
 async def get_detected_containers(hostname: Optional[str] = Query(None)):
-    """List all detected Kafka, Redis, and PostgreSQL containers."""
+    """List all detected Kafka, Redis, PostgreSQL, NGINX, MongoDB, and ClickHouse containers."""
     where_clause = f"hostname = '{hostname}'" if hostname else "1=1"
     
-    containers = {"kafka": [], "redis": [], "postgres": []}
+    containers = {"kafka": [], "redis": [], "postgres": [], "nginx": [], "mongo": [], "clickhouse": []}
     
     # Kafka containers
     query = f"""
@@ -551,7 +551,204 @@ async def get_detected_containers(hostname: Optional[str] = Query(None)):
     results = await clickhouse_query(query)
     containers["postgres"] = results
     
-    return {
-        "containers": containers,
-        "total": len(containers["kafka"]) + len(containers["redis"]) + len(containers["postgres"])
-    }
+    # NGINX containers
+    query = f"""
+        SELECT DISTINCT hostname, container_name, container_id
+        FROM nginx_metrics
+        WHERE {where_clause}
+          AND timestamp > now() - INTERVAL 1 HOUR
+    """
+    results = await clickhouse_query(query)
+    containers["nginx"] = results
+    
+    # MongoDB containers
+    query = f"""
+        SELECT DISTINCT hostname, container_name, container_id
+        FROM mongo_metrics
+        WHERE {where_clause}
+          AND timestamp > now() - INTERVAL 1 HOUR
+    """
+    results = await clickhouse_query(query)
+    containers["mongo"] = results
+    
+    # ClickHouse containers
+    query = f"""
+        SELECT DISTINCT hostname, container_name, container_id
+        FROM clickhouse_metrics
+        WHERE {where_clause}
+          AND timestamp > now() - INTERVAL 1 HOUR
+    """
+    results = await clickhouse_query(query)
+    containers["clickhouse"] = results
+    
+    total = sum(len(v) for v in containers.values())
+    return {"containers": containers, "total": total}
+
+
+# ============================================
+# NGINX Endpoints
+# ============================================
+
+@router.get("/nginx/health")
+async def get_nginx_health(hostname: Optional[str] = Query(None)):
+    """Get NGINX health summary."""
+    where_clause = f"hostname = '{hostname}'" if hostname else "1=1"
+    
+    query = f"""
+        SELECT 
+            hostname,
+            container_name,
+            metric_name,
+            argMax(value, timestamp) as value
+        FROM nginx_metrics
+        WHERE {where_clause}
+          AND timestamp > now() - INTERVAL 5 MINUTE
+        GROUP BY hostname, container_name, metric_name
+    """
+    
+    results = await clickhouse_query(query)
+    
+    health = {"status": "healthy", "issues": [], "instances": {}}
+    
+    for r in results:
+        container = r.get("container_name", "unknown")
+        if container not in health["instances"]:
+            health["instances"][container] = {"hostname": r.get("hostname"), "metrics": {}}
+        health["instances"][container]["metrics"][r.get("metric_name")] = r.get("value")
+    
+    # Check for issues
+    for container, data in health["instances"].items():
+        metrics = data.get("metrics", {})
+        
+        # High connection count
+        active = metrics.get("active_connections", 0)
+        if active > 1000:
+            health["status"] = "warning"
+            health["issues"].append(f"{container}: High active connections ({int(active)})")
+        
+        # Many waiting connections
+        waiting = metrics.get("waiting", 0)
+        if waiting > 100:
+            health["issues"].append(f"{container}: Many waiting connections ({int(waiting)})")
+    
+    return health
+
+
+# ============================================
+# MongoDB Endpoints
+# ============================================
+
+@router.get("/mongo/health")
+async def get_mongo_health(hostname: Optional[str] = Query(None)):
+    """Get MongoDB health summary."""
+    where_clause = f"hostname = '{hostname}'" if hostname else "1=1"
+    
+    query = f"""
+        SELECT 
+            hostname,
+            container_name,
+            metric_name,
+            argMax(value, timestamp) as value
+        FROM mongo_metrics
+        WHERE {where_clause}
+          AND timestamp > now() - INTERVAL 5 MINUTE
+        GROUP BY hostname, container_name, metric_name
+    """
+    
+    results = await clickhouse_query(query)
+    
+    health = {"status": "healthy", "issues": [], "instances": {}}
+    
+    for r in results:
+        container = r.get("container_name", "unknown")
+        if container not in health["instances"]:
+            health["instances"][container] = {"hostname": r.get("hostname"), "metrics": {}}
+        health["instances"][container]["metrics"][r.get("metric_name")] = r.get("value")
+    
+    # Check for issues
+    for container, data in health["instances"].items():
+        metrics = data.get("metrics", {})
+        
+        # Connection pool issues
+        current = metrics.get("connections_current", 0)
+        available = metrics.get("connections_available", 0)
+        if available > 0 and current / (current + available) > 0.9:
+            health["status"] = "critical"
+            health["issues"].append(f"{container}: Connection pool nearly exhausted")
+        
+        # Cache pressure
+        cache_used = metrics.get("cache_bytes_in_cache", 0)
+        cache_max = metrics.get("cache_bytes_max", 0)
+        if cache_max > 0:
+            util = (cache_used / cache_max) * 100
+            if util > 95:
+                health["status"] = "warning" if health["status"] != "critical" else health["status"]
+                health["issues"].append(f"{container}: Cache pressure ({util:.1f}%)")
+        
+        # Lock queue
+        lock_queue = metrics.get("global_lock_queue", 0)
+        if lock_queue > 10:
+            health["issues"].append(f"{container}: Lock queue growing ({int(lock_queue)})")
+    
+    return health
+
+
+# ============================================
+# ClickHouse Endpoints
+# ============================================
+
+@router.get("/clickhouse/health")
+async def get_clickhouse_health(hostname: Optional[str] = Query(None)):
+    """Get ClickHouse health summary."""
+    where_clause = f"hostname = '{hostname}'" if hostname else "1=1"
+    
+    query = f"""
+        SELECT 
+            hostname,
+            container_name,
+            metric_name,
+            argMax(value, timestamp) as value
+        FROM clickhouse_metrics
+        WHERE {where_clause}
+          AND timestamp > now() - INTERVAL 5 MINUTE
+        GROUP BY hostname, container_name, metric_name
+    """
+    
+    results = await clickhouse_query(query)
+    
+    health = {"status": "healthy", "issues": [], "instances": {}}
+    
+    for r in results:
+        container = r.get("container_name", "unknown")
+        if container not in health["instances"]:
+            health["instances"][container] = {"hostname": r.get("hostname"), "metrics": {}}
+        health["instances"][container]["metrics"][r.get("metric_name")] = r.get("value")
+    
+    # Check for issues
+    for container, data in health["instances"].items():
+        metrics = data.get("metrics", {})
+        
+        # Too many parts
+        parts = metrics.get("parts_active", 0)
+        if parts > 3000:
+            health["status"] = "warning"
+            health["issues"].append(f"{container}: High part count ({int(parts)})")
+        
+        # Merge queue growing
+        merge_queue = metrics.get("replicas_queue_size", 0)
+        if merge_queue > 50:
+            health["issues"].append(f"{container}: Merge queue growing ({int(merge_queue)})")
+        
+        # Rejected inserts
+        rejected = metrics.get("rejected_inserts", 0)
+        if rejected > 0:
+            health["status"] = "critical"
+            health["issues"].append(f"{container}: Rejected inserts ({int(rejected)})")
+        
+        # Delayed inserts
+        delayed = metrics.get("delayed_inserts", 0)
+        if delayed > 10:
+            health["status"] = "warning" if health["status"] != "critical" else health["status"]
+            health["issues"].append(f"{container}: Delayed inserts ({int(delayed)})")
+    
+    return health

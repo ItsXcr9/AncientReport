@@ -147,6 +147,45 @@ PARTITION BY toYYYYMM(timestamp)
 ORDER BY (hostname, container_id, database, metric_name, timestamp)
 TTL timestamp + INTERVAL 30 DAY;
 
+-- NGINX Metrics (connections, requests, status)
+CREATE TABLE IF NOT EXISTS nginx_metrics (
+    timestamp DateTime,
+    hostname String,
+    container_id String,
+    container_name String,
+    metric_name String,
+    value Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, container_id, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- MongoDB Metrics (opcounters, connections, cache, replication)
+CREATE TABLE IF NOT EXISTS mongo_metrics (
+    timestamp DateTime,
+    hostname String,
+    container_id String,
+    container_name String,
+    metric_name String,
+    value Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, container_id, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- ClickHouse Metrics (queries, memory, merges, parts)
+CREATE TABLE IF NOT EXISTS clickhouse_metrics (
+    timestamp DateTime,
+    hostname String,
+    container_id String,
+    container_name String,
+    metric_name String,
+    value Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, container_id, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
 -- ============================================
 -- V3 TABLES: Custom Monitoring
 -- ============================================

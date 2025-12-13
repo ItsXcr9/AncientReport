@@ -13,7 +13,7 @@ mod security;
 
 use config::Config;
 use aggregator::MetricAggregator;
-use collectors::{ProcCollector, DockerCollector, EbpfCollector, KafkaMonitor, RedisMonitor, PostgresMonitor};
+use collectors::{ProcCollector, DockerCollector, EbpfCollector, KafkaMonitor, RedisMonitor, PostgresMonitor, NginxMonitor, MongoMonitor, ClickHouseMonitor};
 use streaming::StreamingPublisher;
 use custom_monitors::CustomMonitorManager;
 use security::{PortScanner, ContainerScanner};
@@ -150,6 +150,53 @@ async fn main() -> Result<()> {
     });
     
     info!("✓ Container Application Monitors started (Kafka, Redis, PostgreSQL)");
+
+    // V3.1: NGINX, MongoDB, ClickHouse Monitors
+    info!("Starting V3.1 Additional Container Monitors...");
+    
+    // NGINX Monitor
+    let nginx_clickhouse_url = clickhouse_url.clone();
+    let nginx_hostname = config.agent.hostname.clone();
+    let nginx_handle = tokio::spawn(async move {
+        let monitor = NginxMonitor::new(nginx_hostname, nginx_clickhouse_url);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            if let Err(e) = monitor.collect_and_send().await {
+                tracing::debug!("NGINX monitor error: {}", e);
+            }
+        }
+    });
+    
+    // MongoDB Monitor
+    let mongo_clickhouse_url = clickhouse_url.clone();
+    let mongo_hostname = config.agent.hostname.clone();
+    let mongo_handle = tokio::spawn(async move {
+        let monitor = MongoMonitor::new(mongo_hostname, mongo_clickhouse_url);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if let Err(e) = monitor.collect_and_send().await {
+                tracing::debug!("MongoDB monitor error: {}", e);
+            }
+        }
+    });
+    
+    // ClickHouse Monitor (self-monitoring)
+    let ch_clickhouse_url = clickhouse_url.clone();
+    let ch_hostname = config.agent.hostname.clone();
+    let ch_handle = tokio::spawn(async move {
+        let monitor = ClickHouseMonitor::new(ch_hostname, ch_clickhouse_url);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if let Err(e) = monitor.collect_and_send().await {
+                tracing::debug!("ClickHouse monitor error: {}", e);
+            }
+        }
+    });
+    
+    info!("✓ Additional Monitors started (NGINX, MongoDB, ClickHouse)");
 
     // V3: Start Custom Monitor Manager
     info!("Starting V3 Custom Monitor Manager...");
