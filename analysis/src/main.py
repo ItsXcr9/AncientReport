@@ -67,6 +67,10 @@ app.include_router(sec_scan_api.router, tags=["V3 Security Scanning"])
 app.include_router(ai_chat_api.router, tags=["V3 AI Chat"])
 app.include_router(remediation_api.router, tags=["V3 Auto-Remediation"])
 
+# Register V3 Container Application Monitoring (Kafka, Redis, PostgreSQL)
+from api import container_apps as container_apps_api
+app.include_router(container_apps_api.router, tags=["V3 Container Apps Monitoring"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.

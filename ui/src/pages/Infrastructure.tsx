@@ -6,6 +6,7 @@ import { DockerContainers } from '../components/DockerContainers';
 import { ContainerTopology } from '../components/ContainerTopology';
 import { MonitorResultsWidget } from '../components/MonitorResultsWidget';
 import { ContainerHealthchecks } from '../components/ContainerHealthchecks';
+import { ContainerApps } from '../components/ContainerApps';
 import { CPUChart } from '../components/CPUChart';
 import { MemoryChart } from '../components/MemoryChart';
 import { DiskIOChart } from '../components/DiskIOChart';
@@ -32,6 +33,11 @@ export default function Infrastructure() {
       {/* Network Metrics Panel */}
       <div className="rounded-xl overflow-hidden glass-card">
         <NetworkMetricsPanel selectedNode={selectedServer} />
+      </div>
+
+      {/* Container Applications (Kafka, Redis, PostgreSQL) */}
+      <div>
+        <ContainerApps selectedServer={selectedServer} />
       </div>
 
       {/* Docker Containers Section */}

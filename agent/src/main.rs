@@ -13,7 +13,7 @@ mod security;
 
 use config::Config;
 use aggregator::MetricAggregator;
-use collectors::{ProcCollector, DockerCollector, EbpfCollector};
+use collectors::{ProcCollector, DockerCollector, EbpfCollector, KafkaMonitor, RedisMonitor, PostgresMonitor};
 use streaming::StreamingPublisher;
 use custom_monitors::CustomMonitorManager;
 use security::{PortScanner, ContainerScanner};
@@ -103,6 +103,53 @@ async fn main() -> Result<()> {
         }
     });
     info!("✓ Docker collector started");
+
+    // V3: Start Container Application Monitors (Kafka, Redis, PostgreSQL)
+    info!("Starting V3 Container Application Monitors...");
+    
+    // Kafka Monitor
+    let kafka_clickhouse_url = clickhouse_url.clone();
+    let kafka_hostname = config.agent.hostname.clone();
+    let kafka_handle = tokio::spawn(async move {
+        let monitor = KafkaMonitor::new(kafka_hostname, kafka_clickhouse_url);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if let Err(e) = monitor.collect_and_send().await {
+                tracing::debug!("Kafka monitor error: {}", e);
+            }
+        }
+    });
+    
+    // Redis Monitor
+    let redis_clickhouse_url = clickhouse_url.clone();
+    let redis_hostname = config.agent.hostname.clone();
+    let redis_handle = tokio::spawn(async move {
+        let monitor = RedisMonitor::new(redis_hostname, redis_clickhouse_url);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            if let Err(e) = monitor.collect_and_send().await {
+                tracing::debug!("Redis monitor error: {}", e);
+            }
+        }
+    });
+    
+    // PostgreSQL Monitor
+    let postgres_clickhouse_url = clickhouse_url.clone();
+    let postgres_hostname = config.agent.hostname.clone();
+    let postgres_handle = tokio::spawn(async move {
+        let monitor = PostgresMonitor::new(postgres_hostname, postgres_clickhouse_url);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if let Err(e) = monitor.collect_and_send().await {
+                tracing::debug!("PostgreSQL monitor error: {}", e);
+            }
+        }
+    });
+    
+    info!("✓ Container Application Monitors started (Kafka, Redis, PostgreSQL)");
 
     // V3: Start Custom Monitor Manager
     info!("Starting V3 Custom Monitor Manager...");

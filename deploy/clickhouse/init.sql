@@ -98,6 +98,56 @@ CREATE TABLE IF NOT EXISTS settings (
 ORDER BY setting_key;
 
 -- ============================================
+-- V3 TABLES: Container Application Monitoring
+-- ============================================
+
+-- Kafka Metrics (consumer lag, ISR, partitions)
+CREATE TABLE IF NOT EXISTS kafka_metrics (
+    timestamp DateTime,
+    hostname String,
+    broker_id String,
+    container_id String,
+    container_name String,
+    metric_name String,
+    value Float64,
+    consumer_group String DEFAULT '',
+    topic String DEFAULT '',
+    partition Int32 DEFAULT -1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, broker_id, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- Redis Metrics (memory, hit rate, clients, replication)
+CREATE TABLE IF NOT EXISTS redis_metrics (
+    timestamp DateTime,
+    hostname String,
+    container_id String,
+    container_name String,
+    metric_name String,
+    value Float64,
+    db String DEFAULT ''
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, container_id, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- PostgreSQL Metrics (connections, cache ratio, replication, WAL)
+CREATE TABLE IF NOT EXISTS postgres_metrics (
+    timestamp DateTime,
+    hostname String,
+    container_id String,
+    container_name String,
+    database String,
+    metric_name String,
+    value Float64,
+    extra String DEFAULT ''
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, container_id, database, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- ============================================
 -- V3 TABLES: Custom Monitoring
 -- ============================================
 
