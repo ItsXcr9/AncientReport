@@ -7,7 +7,8 @@ import {
   Brain, 
   Settings, 
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -26,6 +27,7 @@ export function DashboardLayout({ children, header, outletContext }: DashboardLa
   const navItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Infrastructure', path: '/infrastructure', icon: Server },
+    { name: 'Applications', path: '/applications', icon: Database },
     { name: 'Security', path: '/security', icon: Shield },
     { name: 'Analysis', path: '/analysis', icon: Brain },
   ];

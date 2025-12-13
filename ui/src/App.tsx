@@ -9,6 +9,7 @@ import { DashboardLayout } from './layouts/DashboardLayout';
 // Page imports (Default exports)
 import DashboardHome from './pages/DashboardHome';
 import Infrastructure from './pages/Infrastructure';
+import Applications from './pages/Applications';
 import Security from './pages/Security';
 import Analysis from './pages/Analysis';
 import SettingsPage from './pages/SettingsPage';
@@ -334,6 +335,7 @@ function App() {
             }>
                 <Route index element={<DashboardHome />} />
                 <Route path="infrastructure" element={<Infrastructure />} />
+                <Route path="applications" element={<Applications />} />
                 <Route path="security" element={<Security />} />
                 <Route path="analysis" element={<Analysis />} />
                 <Route path="settings" element={<SettingsPage />} />
