@@ -71,6 +71,10 @@ app.include_router(remediation_api.router, tags=["V3 Auto-Remediation"])
 from api import container_apps as container_apps_api
 app.include_router(container_apps_api.router, tags=["V3 Container Apps Monitoring"])
 
+# Register V4 Prometheus-compatible Metrics Scraping (replaces Prometheus + Grafana)
+from api import prometheus as prometheus_api
+app.include_router(prometheus_api.router, prefix="/api/prometheus", tags=["V4 Metrics Scraping"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -455,6 +459,13 @@ async def startup_event():
                 
         asyncio.create_task(run_ingestion_gateway())
         logger.info("✓ NATS ingestion gateway task created (NATS → ClickHouse + WebSocket)")
+    
+    # Start Prometheus-compatible metrics scraper
+    try:
+        prometheus_api.start_scraper()
+        logger.info("✓ Metrics scraper started (Prometheus-compatible)")
+    except Exception as e:
+        logger.warning(f"Could not start metrics scraper: {e}")
     
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 

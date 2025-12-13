@@ -432,3 +432,39 @@ CREATE TABLE IF NOT EXISTS remediation_history (
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY (hostname, timestamp)
 TTL timestamp + INTERVAL 1 YEAR;
+
+-- ============================================
+-- V4 TABLES: Built-in Metrics Monitoring
+-- (Replaces Prometheus + Grafana)
+-- ============================================
+
+-- Metric Scrape Targets (replaces prometheus.yml config)
+CREATE TABLE IF NOT EXISTS metric_targets (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    url String,                    -- e.g., http://node:9100/metrics
+    scrape_interval UInt32 DEFAULT 15,  -- seconds
+    timeout UInt32 DEFAULT 10,          -- seconds
+    labels String DEFAULT '{}',         -- JSON: static labels to add
+    enabled Bool DEFAULT true,
+    last_scrape DateTime DEFAULT now(),
+    last_status String DEFAULT 'pending',
+    last_error String DEFAULT '',
+    metrics_count UInt32 DEFAULT 0,
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (name, id);
+
+-- Scraped Metrics (replaces Prometheus TSDB)
+CREATE TABLE IF NOT EXISTS scraped_metrics (
+    timestamp DateTime,
+    target_id UUID,
+    target_name String,
+    metric_name String,
+    labels String,            -- JSON: {"instance":"host:9100","job":"node"}
+    value Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (target_id, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
