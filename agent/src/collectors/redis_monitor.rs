@@ -92,7 +92,7 @@ impl RedisMonitor {
     }
 
     /// Collect all Redis metrics from detected containers
-    pub async fn collect_and_send(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn collect_and_send(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let containers = self.detect_redis_containers();
         
         if containers.is_empty() {
@@ -123,7 +123,7 @@ impl RedisMonitor {
         &self,
         container_id: &str,
         container_name: &str,
-    ) -> Result<RedisMetrics, Box<dyn std::error::Error>> {
+    ) -> Result<RedisMetrics, Box<dyn std::error::Error + Send + Sync>> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -167,7 +167,7 @@ impl RedisMonitor {
     }
 
     /// Execute redis-cli INFO command
-    fn execute_redis_info(&self, container_id: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn execute_redis_info(&self, container_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Try without password first
         let output = Command::new(&self.docker_path)
             .args(&["exec", container_id, "redis-cli", "INFO", "ALL"])
@@ -397,7 +397,7 @@ impl RedisMonitor {
     }
 
     /// Send metrics to ClickHouse
-    async fn send_to_clickhouse(&self, metrics: &RedisMetrics) -> Result<(), Box<dyn std::error::Error>> {
+    async fn send_to_clickhouse(&self, metrics: &RedisMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::new();
 
         // Send all metrics

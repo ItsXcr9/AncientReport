@@ -107,7 +107,7 @@ impl KafkaMonitor {
     }
 
     /// Collect all Kafka metrics from detected containers
-    pub async fn collect_and_send(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn collect_and_send(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let containers = self.detect_kafka_containers();
         
         if containers.is_empty() {
@@ -138,7 +138,7 @@ impl KafkaMonitor {
         &self,
         container_id: &str,
         container_name: &str,
-    ) -> Result<KafkaMetrics, Box<dyn std::error::Error>> {
+    ) -> Result<KafkaMetrics, Box<dyn std::error::Error + Send + Sync>> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -511,7 +511,7 @@ impl KafkaMonitor {
     }
 
     /// Send metrics to ClickHouse
-    async fn send_to_clickhouse(&self, metrics: &KafkaMetrics) -> Result<(), Box<dyn std::error::Error>> {
+    async fn send_to_clickhouse(&self, metrics: &KafkaMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::new();
 
         // Send aggregate metrics

@@ -93,7 +93,7 @@ impl PostgresMonitor {
     }
 
     /// Collect all PostgreSQL metrics from detected containers
-    pub async fn collect_and_send(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn collect_and_send(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let containers = self.detect_postgres_containers();
         
         if containers.is_empty() {
@@ -124,7 +124,7 @@ impl PostgresMonitor {
         &self,
         container_id: &str,
         container_name: &str,
-    ) -> Result<PostgresMetrics, Box<dyn std::error::Error>> {
+    ) -> Result<PostgresMetrics, Box<dyn std::error::Error + Send + Sync>> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -558,7 +558,7 @@ impl PostgresMonitor {
     }
 
     /// Send metrics to ClickHouse
-    async fn send_to_clickhouse(&self, metrics: &PostgresMetrics) -> Result<(), Box<dyn std::error::Error>> {
+    async fn send_to_clickhouse(&self, metrics: &PostgresMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::new();
 
         // Send global metrics
