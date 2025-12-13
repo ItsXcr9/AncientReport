@@ -55,11 +55,11 @@ export default function Observability() {
           const data = await response.json();
           setTargets(data);
           
-          // Auto-select first target with metrics
+          // Auto-select first enabled target
           if (data.length > 0 && !selectedTarget) {
-            const targetWithMetrics = data.find((t: Target) => t.metrics_count > 0 && t.enabled);
-            if (targetWithMetrics) {
-              setSelectedTarget(targetWithMetrics.id);
+            const enabledTarget = data.find((t: Target) => t.enabled);
+            if (enabledTarget) {
+              setSelectedTarget(enabledTarget.id);
             }
           }
         }
@@ -149,7 +149,7 @@ export default function Observability() {
       <MetricTargetsPanel />
 
       {/* Metrics Dashboard */}
-      {targets.some(t => t.metrics_count > 0) && (
+      {targets.some(t => t.enabled) && (
         <motion.div 
           className="glass-card rounded-xl p-6"
           initial={{ opacity: 0, y: 20 }}
@@ -173,7 +173,7 @@ export default function Observability() {
                   className="appearance-none bg-white/5 border border-white/10 rounded-lg px-4 py-2 pr-8 text-sm text-white focus:outline-none focus:border-neon-blue cursor-pointer"
                 >
                   <option value="" disabled>Select Target</option>
-                  {targets.filter(t => t.enabled && t.metrics_count > 0).map(t => (
+                  {targets.filter(t => t.enabled).map(t => (
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>

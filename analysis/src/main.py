@@ -75,6 +75,12 @@ app.include_router(container_apps_api.router, tags=["V3 Container Apps Monitorin
 from api import prometheus as prometheus_api
 app.include_router(prometheus_api.router, prefix="/api/prometheus", tags=["V4 Metrics Scraping"])
 
+# Register V5 Custom Dashboards & Metric Alerts
+from api import dashboards as dashboards_api
+from api import alerts as metric_alerts_api
+app.include_router(dashboards_api.router, tags=["V5 Dashboards"])
+app.include_router(metric_alerts_api.router, tags=["V5 Metric Alerts"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -466,6 +472,13 @@ async def startup_event():
         logger.info("✓ Metrics scraper started (Prometheus-compatible)")
     except Exception as e:
         logger.warning(f"Could not start metrics scraper: {e}")
+    
+    # Start metric alert evaluator background task
+    try:
+        asyncio.create_task(metric_alerts_api.alert_evaluator_loop())
+        logger.info("✓ Metric alert evaluator started (30s cycle)")
+    except Exception as e:
+        logger.warning(f"Could not start alert evaluator: {e}")
     
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 

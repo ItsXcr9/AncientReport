@@ -468,3 +468,65 @@ CREATE TABLE IF NOT EXISTS scraped_metrics (
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY (target_id, metric_name, timestamp)
 TTL timestamp + INTERVAL 30 DAY;
+
+-- ============================================
+-- V5 TABLES: Custom Dashboards & Metric Alerts
+-- ============================================
+
+-- Custom Dashboards
+CREATE TABLE IF NOT EXISTS dashboards (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    description String DEFAULT '',
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Dashboard Panels (charts)
+CREATE TABLE IF NOT EXISTS dashboard_panels (
+    id UUID DEFAULT generateUUIDv4(),
+    dashboard_id UUID,
+    title String,
+    target_id UUID,          -- metric_targets.id
+    metric_name String,
+    chart_type String DEFAULT 'area',  -- 'area', 'line', 'bar'
+    color String DEFAULT '#00F3FF',
+    position Int32 DEFAULT 0,
+    time_range String DEFAULT '1h',  -- '1h', '6h', '24h', '7d'
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+ORDER BY (dashboard_id, position);
+
+-- Metric Alert Rules (for scraped Prometheus metrics)
+CREATE TABLE IF NOT EXISTS metric_alert_rules (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    target_id UUID,          -- metric_targets.id
+    metric_name String,
+    condition String,        -- 'gt', 'lt', 'eq', 'gte', 'lte'
+    threshold Float64,
+    duration_seconds Int32 DEFAULT 60,  -- How long condition must be true
+    notification_channel String DEFAULT 'webhook',
+    notification_config String DEFAULT '{}',  -- JSON: {url, headers, etc}
+    enabled UInt8 DEFAULT 1,
+    last_triggered DateTime,
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Metric Alert History
+CREATE TABLE IF NOT EXISTS metric_alert_history (
+    id UUID DEFAULT generateUUIDv4(),
+    rule_id UUID,
+    rule_name String,
+    triggered_at DateTime DEFAULT now(),
+    value Float64,
+    threshold Float64,
+    status String DEFAULT 'firing',  -- 'firing', 'resolved'
+    notified UInt8 DEFAULT 0,
+    notification_sent_at Nullable(DateTime)
+) ENGINE = MergeTree()
+ORDER BY (rule_id, triggered_at)
+TTL triggered_at + INTERVAL 30 DAY;

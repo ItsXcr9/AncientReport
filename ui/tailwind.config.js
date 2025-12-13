@@ -11,6 +11,12 @@ export default {
         'secondary': '#1a1d29',
         'tertiary': '#22262f',
         'elevated': '#2a2e3a',
+        'deep': '#0a0d14',
+        'neon': {
+          'blue': '#00F3FF',
+          'purple': '#8B5CF6',
+          'green': '#10B981',
+        },
         'accent': {
           'primary': '#3b82f6',
           'secondary': '#8b5cf6',

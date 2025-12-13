@@ -92,10 +92,10 @@ async def list_targets():
             FINAL
             ORDER BY name
         """
-        result = client.query(query)
+        result = client.client.execute(query)
         
         targets = []
-        for row in result.result_rows:
+        for row in result:
             labels = {}
             try:
                 if row[5]:
@@ -139,17 +139,12 @@ async def create_target(target: TargetCreate, background_tasks: BackgroundTasks)
             (name, url, scrape_interval, timeout, labels, enabled)
             VALUES
         """
-        client.command(
-            query + " (%(name)s, %(url)s, %(interval)s, %(timeout)s, %(labels)s, %(enabled)s)",
-            parameters={
-                "name": target.name,
-                "url": target.url,
-                "interval": target.scrape_interval,
-                "timeout": target.timeout,
-                "labels": labels_json,
-                "enabled": target.enabled
-            }
-        )
+        insert_sql = f"""
+            INSERT INTO metric_targets 
+            (name, url, scrape_interval, timeout, labels, enabled)
+            VALUES ('{target.name}', '{target.url}', {target.scrape_interval}, {target.timeout}, '{labels_json}', {1 if target.enabled else 0})
+        """
+        client.client.execute(insert_sql)
         
         # Fetch the created target
         fetch_query = """
@@ -166,10 +161,10 @@ async def create_target(target: TargetCreate, background_tasks: BackgroundTasks)
             ORDER BY created_at DESC
             LIMIT 1
         """
-        result = client.query(fetch_query, parameters={"name": target.name})
+        result = client.client.execute(fetch_query % {"name": "'" + target.name + "'"})
         
-        if result.result_rows:
-            row = result.result_rows[0]
+        if result:
+            row = result[0]
             labels = {}
             try:
                 if row[5]:
@@ -239,12 +234,24 @@ async def update_target(target_id: str, update: TargetUpdate):
         
         updates.append("updated_at = now()")
         
+        # Build final query with string interpolation
+        update_str = ', '.join(updates)
+        for k, v in params.items():
+            if k == 'id':
+                continue
+            if isinstance(v, str):
+                update_str = update_str.replace(f"%({k})s", f"'{v}'")
+            elif isinstance(v, bool):
+                update_str = update_str.replace(f"%({k})s", str(int(v)))
+            else:
+                update_str = update_str.replace(f"%({k})s", str(v))
+        
         query = f"""
             ALTER TABLE metric_targets
-            UPDATE {', '.join(updates)}
-            WHERE id = toUUID(%(id)s)
+            UPDATE {update_str}
+            WHERE id = toUUID('{target_id}')
         """
-        client.command(query, parameters=params)
+        client.client.execute(query)
         
         # Fetch updated target
         return await get_target(target_id)
@@ -264,12 +271,12 @@ async def delete_target(target_id: str):
     
     try:
         # Delete target
-        query = "ALTER TABLE metric_targets DELETE WHERE id = toUUID(%(id)s)"
-        client.command(query, parameters={"id": target_id})
+        query = f"ALTER TABLE metric_targets DELETE WHERE id = toUUID('{target_id}')"
+        client.client.execute(query)
         
         # Also delete associated metrics
-        metrics_query = "ALTER TABLE scraped_metrics DELETE WHERE target_id = toUUID(%(id)s)"
-        client.command(metrics_query, parameters={"id": target_id})
+        metrics_query = f"ALTER TABLE scraped_metrics DELETE WHERE target_id = toUUID('{target_id}')"
+        client.client.execute(metrics_query)
         
         return {"status": "deleted", "id": target_id}
     except Exception as e:
@@ -295,14 +302,14 @@ async def get_target(target_id: str):
                 toString(created_at) as created_at
             FROM metric_targets
             FINAL
-            WHERE id = toUUID(%(id)s)
+            WHERE id = toUUID('{target_id}')
         """
-        result = client.query(query, parameters={"id": target_id})
+        result = client.client.execute(query)
         
-        if not result.result_rows:
+        if not result:
             raise HTTPException(status_code=404, detail="Target not found")
         
-        row = result.result_rows[0]
+        row = result[0]
         labels = {}
         try:
             if row[5]:
@@ -340,16 +347,16 @@ async def test_target(target_id: str):
     
     try:
         # Get target URL
-        query = """
+        query = f"""
             SELECT url, timeout FROM metric_targets FINAL
-            WHERE id = toUUID(%(id)s)
+            WHERE id = toUUID('{target_id}')
         """
-        result = client.query(query, parameters={"id": target_id})
+        result = client.client.execute(query)
         
-        if not result.result_rows:
+        if not result:
             raise HTTPException(status_code=404, detail="Target not found")
         
-        url, timeout = result.result_rows[0]
+        url, timeout = result[0]
         
         # Test connection
         async with httpx.AsyncClient(timeout=timeout) as http_client:
@@ -435,10 +442,18 @@ async def query_scraped_metrics(
             LIMIT {min(limit, 10000)}
         """
         
-        result = client.query(query, parameters=params)
+        # Build query with string interpolation for parameters
+        final_query = query
+        for k, v in params.items():
+            if isinstance(v, str):
+                final_query = final_query.replace(f"%({k})s", f"'{v}'")
+            else:
+                final_query = final_query.replace(f"%({k})s", str(v))
+        
+        result = client.client.execute(final_query)
         
         data = []
-        for row in result.result_rows:
+        for row in result:
             labels = {}
             try:
                 if row[4]:
@@ -475,11 +490,64 @@ async def get_metric_series(
         raise HTTPException(status_code=503, detail="Database not available")
     
     try:
+        # Helper to convert ISO datetime to ClickHouse format with timezone conversion
+        def to_clickhouse_datetime(dt_str: str) -> str:
+            """Convert various datetime formats to ClickHouse-compatible format (server local time)"""
+            if not dt_str:
+                return None
+            try:
+                # Handle ISO format with timezone (2025-12-14T01:10:49.270368Z)
+                if 'T' in dt_str:
+                    from datetime import timezone
+                    import time
+                    
+                    # Get server's UTC offset dynamically
+                    server_offset_seconds = -time.timezone if time.daylight == 0 else -time.altzone
+                    server_offset = timedelta(seconds=server_offset_seconds)
+                    
+                    # Remove Z and replace with +00:00 for parsing
+                    clean = dt_str
+                    if clean.endswith('Z'):
+                        clean = clean[:-1] + '+00:00'
+                    
+                    # Handle microseconds - keep timezone part after
+                    if '.' in clean and '+' in clean:
+                        parts = clean.split('.')
+                        tz_start = parts[1].find('+') if '+' in parts[1] else parts[1].find('-')
+                        if tz_start != -1:
+                            clean = parts[0] + parts[1][tz_start:]
+                        else:
+                            clean = parts[0]
+                    elif '.' in clean:
+                        clean = clean.split('.')[0]
+                    
+                    # Parse the datetime
+                    dt = datetime.fromisoformat(clean)
+                    
+                    # Convert to server local time
+                    # If datetime has timezone info, convert. Otherwise assume it's already local
+                    if dt.tzinfo is not None:
+                        # Convert from incoming timezone to UTC, then to local
+                        utc_dt = dt.astimezone(timezone.utc)
+                        local_dt = utc_dt + server_offset
+                        return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    return dt.strftime('%Y-%m-%d %H:%M:%S')
+                return dt_str
+            except Exception as e:
+                logger.warning(f"Failed to parse datetime {dt_str}: {e}")
+                return dt_str
+        
         # Default time range: last hour
         if not end:
-            end = datetime.now().isoformat()
+            end = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            end = to_clickhouse_datetime(end)
+            
         if not start:
-            start = (datetime.now() - timedelta(hours=1)).isoformat()
+            start = (datetime.now() - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            start = to_clickhouse_datetime(start)
         
         # Map step to ClickHouse interval
         step_map = {
@@ -506,15 +574,10 @@ async def get_metric_series(
             ORDER BY ts
         """
         
-        result = client.query(query, parameters={
-            "target_id": target_id,
-            "metric_name": metric_name,
-            "start": start,
-            "end": end
-        })
+        result = client.client.execute(query.replace("%(target_id)s", f"'{target_id}'").replace("%(metric_name)s", f"'{metric_name}'").replace("%(start)s", f"'{start}'").replace("%(end)s", f"'{end}'"))
         
         data = []
-        for row in result.result_rows:
+        for row in result:
             data.append({
                 "timestamp": row[0],
                 "value": row[1],
@@ -556,10 +619,15 @@ async def list_available_metrics(target_id: Optional[str] = None):
             LIMIT 500
         """
         
-        result = client.query(query, parameters=params)
+        # Build query with string interpolation
+        final_query = query
+        for k, v in params.items():
+            final_query = final_query.replace(f"%({k})s", f"'{v}'")
+        
+        result = client.client.execute(final_query)
         
         metrics = []
-        for row in result.result_rows:
+        for row in result:
             metrics.append({
                 "name": row[0],
                 "sample_count": row[1],
@@ -651,16 +719,16 @@ async def scrape_target_by_id(target_id: str):
     
     try:
         # Get target details
-        query = """
+        query = f"""
             SELECT url, timeout, name, labels FROM metric_targets FINAL
-            WHERE id = toUUID(%(id)s) AND enabled = true
+            WHERE id = toUUID('{target_id}') AND enabled = true
         """
-        result = client.query(query, parameters={"id": target_id})
+        result = client.client.execute(query)
         
-        if not result.result_rows:
+        if not result:
             return
         
-        url, timeout, name, static_labels_str = result.result_rows[0]
+        url, timeout, name, static_labels_str = result[0]
         
         # Parse static labels
         static_labels = {}
@@ -713,7 +781,7 @@ async def _scrape_url(client, target_id: str, target_name: str, url: str, timeou
                             (timestamp, target_id, target_name, metric_name, labels, value)
                             VALUES {', '.join(batch)}
                         """
-                        client.command(insert_query)
+                        client.client.execute(insert_query)
     
     except httpx.RequestError as e:
         status = "error"
@@ -723,24 +791,33 @@ async def _scrape_url(client, target_id: str, target_name: str, url: str, timeou
         error = str(e)
         logger.error(f"Scrape error for {url}: {e}")
     
-    # Update target status
+    # Update target status using INSERT (ReplacingMergeTree will dedupe by updated_at)
     try:
-        update_query = """
-            ALTER TABLE metric_targets
-            UPDATE 
-                last_scrape = now(),
-                last_status = %(status)s,
-                last_error = %(error)s,
-                metrics_count = %(count)s,
-                updated_at = now()
-            WHERE id = toUUID(%(id)s)
+        # First get the existing target data
+        fetch_query = f"""
+            SELECT name, url, scrape_interval, timeout, labels, enabled, created_at
+            FROM metric_targets FINAL
+            WHERE id = toUUID('{target_id}')
         """
-        client.command(update_query, parameters={
-            "id": target_id,
-            "status": status,
-            "error": error,
-            "count": metrics_count
-        })
+        existing = client.client.execute(fetch_query)
+        
+        if existing:
+            row = existing[0]
+            safe_error = error.replace("'", "''")
+            # Insert new row - ReplacingMergeTree will keep latest by updated_at
+            insert_query = f"""
+                INSERT INTO metric_targets 
+                (id, name, url, scrape_interval, timeout, labels, enabled, 
+                 last_scrape, last_status, last_error, metrics_count, created_at, updated_at)
+                VALUES (
+                    toUUID('{target_id}'), '{row[0]}', '{row[1]}', {row[2]}, {row[3]}, 
+                    '{row[4] if row[4] else '{}'}', {1 if row[5] else 0},
+                    now(), '{status}', '{safe_error}', {metrics_count}, 
+                    '{row[6].strftime('%Y-%m-%d %H:%M:%S') if row[6] else 'now()'}', now()
+                )
+            """
+            client.client.execute(insert_query)
+            logger.info(f"Updated target {target_id} status: {status}, metrics: {metrics_count}")
     except Exception as e:
         logger.error(f"Failed to update target status: {e}")
 
@@ -766,9 +843,9 @@ async def run_scraper_loop():
                 FINAL
                 WHERE enabled = true
             """
-            result = client.query(query)
+            result = client.client.execute(query)
             
-            for row in result.result_rows:
+            for row in result:
                 target_id, url, timeout, name, labels_str, interval, last_scrape = row
                 
                 # Check if it's time to scrape

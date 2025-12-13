@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Plus, Trash2, Edit2, RefreshCw, Check, X, 
@@ -360,8 +361,9 @@ export function MetricTargetsPanel() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      <AnimatePresence>
+      {/* Add/Edit Modal - Rendered via Portal to avoid clipping */}
+      {createPortal(
+        <AnimatePresence>
         {(showAddModal || editingTarget) && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -465,7 +467,9 @@ export function MetricTargetsPanel() {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

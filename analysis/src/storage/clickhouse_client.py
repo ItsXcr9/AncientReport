@@ -1,9 +1,31 @@
 import logging
+import os
 from clickhouse_driver import Client
 from typing import List, Dict, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Global singleton client
+_clickhouse_client = None
+
+def get_clickhouse_client():
+    """Get or create a singleton ClickHouse client"""
+    global _clickhouse_client
+    if _clickhouse_client is None:
+        _clickhouse_client = ClickHouseClient(
+            host=os.getenv("CLICKHOUSE_HOST", "clickhouse"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            database=os.getenv("CLICKHOUSE_DB", "AncientReport"),
+            user=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", "")
+        )
+    return _clickhouse_client
+
+def set_clickhouse_client(client):
+    """Set the global ClickHouse client (useful for injection during startup)"""
+    global _clickhouse_client
+    _clickhouse_client = client
 
 
 class ClickHouseClient:

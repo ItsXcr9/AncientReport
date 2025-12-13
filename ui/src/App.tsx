@@ -13,6 +13,9 @@ import Observability from './pages/Observability';
 import Security from './pages/Security';
 import Analysis from './pages/Analysis';
 import SettingsPage from './pages/SettingsPage';
+import Dashboards from './pages/Dashboards';
+import DashboardView from './pages/DashboardView';
+import Alerts from './pages/Alerts';
 
 import { SettingsModal } from './components/SettingsModal';
 import { AIChat } from './components/AIChat';
@@ -339,6 +342,9 @@ function App() {
                 <Route path="security" element={<Security />} />
                 <Route path="analysis" element={<Analysis />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="dashboards" element={<Dashboards />} />
+                <Route path="dashboards/:id" element={<DashboardView />} />
+                <Route path="alerts" element={<Alerts />} />
             </Route>
         </Routes>
         
