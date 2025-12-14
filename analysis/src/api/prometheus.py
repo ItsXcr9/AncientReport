@@ -22,6 +22,37 @@ router = APIRouter()
 # Global scraper task reference
 _scraper_task: Optional[asyncio.Task] = None
 
+# Shared HTTP client for scraping (properly managed connection pool)
+_http_client: Optional[httpx.AsyncClient] = None
+
+# Semaphore to limit concurrent scrapes (prevents file descriptor exhaustion)
+_scrape_semaphore: Optional[asyncio.Semaphore] = None
+MAX_CONCURRENT_SCRAPES = 10  # Maximum simultaneous scrape requests
+
+async def get_http_client() -> httpx.AsyncClient:
+    """Get or create the shared HTTP client with connection pooling"""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        # Use limits to prevent connection exhaustion
+        limits = httpx.Limits(
+            max_keepalive_connections=20,
+            max_connections=50,
+            keepalive_expiry=30.0
+        )
+        _http_client = httpx.AsyncClient(
+            limits=limits,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            follow_redirects=True
+        )
+    return _http_client
+
+async def close_http_client():
+    """Close the shared HTTP client"""
+    global _http_client
+    if _http_client:
+        await _http_client.aclose()
+        _http_client = None
+
 
 # ============================================
 # Models
@@ -827,13 +858,21 @@ async def scrape_target_by_id(target_id: str):
 
 async def _scrape_url(client, target_id: str, target_name: str, url: str, timeout: int, static_labels: Dict):
     """Scrape a URL and store metrics"""
+    global _scrape_semaphore
+    
+    # Initialize semaphore if needed
+    if _scrape_semaphore is None:
+        _scrape_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCRAPES)
+    
     status = "success"
     error = ""
     metrics_count = 0
     
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as http_client:
-            response = await http_client.get(url)
+    # Use semaphore to limit concurrent scrapes
+    async with _scrape_semaphore:
+        try:
+            http_client = await get_http_client()
+            response = await http_client.get(url, timeout=timeout)
             
             if response.status_code != 200:
                 status = "error"
@@ -865,13 +904,13 @@ async def _scrape_url(client, target_id: str, target_name: str, url: str, timeou
                         """
                         client.client.execute(insert_query)
     
-    except httpx.RequestError as e:
-        status = "error"
-        error = str(e)
-    except Exception as e:
-        status = "error"
-        error = str(e)
-        logger.error(f"Scrape error for {url}: {e}")
+        except httpx.RequestError as e:
+            status = "error"
+            error = str(e)
+        except Exception as e:
+            status = "error"
+            error = str(e)
+            logger.error(f"Scrape error for {url}: {e}")
     
     # Update target status using INSERT (ReplacingMergeTree will dedupe by updated_at)
     try:
