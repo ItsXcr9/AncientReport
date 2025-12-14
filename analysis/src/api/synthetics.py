@@ -542,8 +542,7 @@ async def store_check_result(client, monitor_id: str, monitor_name: str, result:
             last_check = now(),
             last_status = '{status}',
             last_latency_ms = {result["latency_ms"]},
-            consecutive_failures = {new_failures},
-            updated_at = now()
+            consecutive_failures = {new_failures}
             WHERE id = toUUID('{monitor_id}')
         """
         client.client.execute(update_query)

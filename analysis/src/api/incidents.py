@@ -179,7 +179,7 @@ async def add_alert_to_incident(client, incident_id: str, alert: dict):
     if alert_severity == "critical":
         current_severity = "critical"
     
-    # Update incident
+    # Update incident - Don't update updated_at as it's the version column
     update_query = f"""
         ALTER TABLE alert_incidents UPDATE
         affected_hosts = '{json.dumps(affected_hosts)}',
@@ -187,8 +187,7 @@ async def add_alert_to_incident(client, incident_id: str, alert: dict):
         alert_ids = '{json.dumps(alert_ids)}',
         alert_count = {alert_count},
         severity = '{current_severity}',
-        last_alert_at = now(),
-        updated_at = now()
+        last_alert_at = now()
         WHERE id = toUUID('{incident_id}')
     """
     client.client.execute(update_query)
@@ -359,8 +358,7 @@ async def acknowledge_incident(incident_id: str, user: str = "admin"):
             ALTER TABLE alert_incidents UPDATE
             status = 'acknowledged',
             acknowledged_by = '{user}',
-            acknowledged_at = now(),
-            updated_at = now()
+            acknowledged_at = now()
             WHERE id = toUUID('{incident_id}')
         """
         client.client.execute(query)
@@ -386,8 +384,7 @@ async def resolve_incident(incident_id: str, user: str = "admin", notes: str = "
             status = 'resolved',
             resolved_by = '{user}',
             resolved_at = now(),
-            resolution_notes = '{safe_notes}',
-            updated_at = now()
+            resolution_notes = '{safe_notes}'
             WHERE id = toUUID('{incident_id}')
         """
         client.client.execute(query)
@@ -420,8 +417,6 @@ async def update_incident(incident_id: str, data: IncidentUpdate):
         
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
-        
-        updates.append("updated_at = now()")
         
         query = f"""
             ALTER TABLE alert_incidents UPDATE
@@ -558,8 +553,7 @@ async def auto_resolve_stale_incidents():
             status = 'resolved',
             resolved_by = 'system',
             resolved_at = now(),
-            resolution_notes = 'Auto-resolved: No new alerts for 30 minutes',
-            updated_at = now()
+            resolution_notes = 'Auto-resolved: No new alerts for 30 minutes'
             WHERE status IN ('open', 'acknowledged')
               AND last_alert_at < now() - INTERVAL 30 MINUTE
         """
