@@ -89,6 +89,16 @@ app.include_router(recording_rules_api.router, tags=["V6 Recording Rules"])
 from api import snmp as snmp_api
 app.include_router(snmp_api.router, tags=["V7 SNMP Monitoring"])
 
+# Register V8 Advanced Analytics (ML Anomaly Detection, SLO Tracking, Synthetic Monitoring, Alert Correlation)
+from api import analytics as analytics_api
+from api import slo as slo_api
+from api import synthetics as synthetics_api
+from api import incidents as incidents_api
+app.include_router(analytics_api.router, tags=["V8 Analytics & ML"])
+app.include_router(slo_api.router, tags=["V8 SLO Tracking"])
+app.include_router(synthetics_api.router, tags=["V8 Synthetic Monitoring"])
+app.include_router(incidents_api.router, tags=["V8 Alert Incidents"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -503,6 +513,31 @@ async def startup_event():
         logger.info("✓ SNMP monitoring started (polling loop active)")
     except Exception as e:
         logger.warning(f"Could not start SNMP monitoring: {e}")
+    
+    # Start V8 Advanced Analytics background tasks
+    try:
+        asyncio.create_task(analytics_api.anomaly_detection_loop())
+        logger.info("✓ Anomaly detection loop started (60s cycle)")
+    except Exception as e:
+        logger.warning(f"Could not start anomaly detection: {e}")
+    
+    try:
+        asyncio.create_task(slo_api.slo_calculation_loop())
+        logger.info("✓ SLO calculation loop started (60s cycle)")
+    except Exception as e:
+        logger.warning(f"Could not start SLO calculation: {e}")
+    
+    try:
+        asyncio.create_task(synthetics_api.synthetic_check_loop())
+        logger.info("✓ Synthetic monitoring loop started (10s cycle)")
+    except Exception as e:
+        logger.warning(f"Could not start synthetic monitoring: {e}")
+    
+    try:
+        asyncio.create_task(incidents_api.alert_correlation_loop())
+        logger.info("✓ Alert correlation loop started (30s cycle)")
+    except Exception as e:
+        logger.warning(f"Could not start alert correlation: {e}")
     
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 

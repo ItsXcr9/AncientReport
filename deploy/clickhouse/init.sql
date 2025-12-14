@@ -698,3 +698,147 @@ CREATE TABLE IF NOT EXISTS snmp_interfaces (
     last_updated DateTime DEFAULT now()
 ) ENGINE = ReplacingMergeTree(last_updated)
 ORDER BY (device_id, if_index);
+
+-- ============================================
+-- Advanced Analytics Tables
+-- ============================================
+
+-- Detected Anomalies (ML/Statistical)
+CREATE TABLE IF NOT EXISTS anomalies (
+    id UUID DEFAULT generateUUIDv4(),
+    timestamp DateTime DEFAULT now(),
+    hostname String,
+    metric_name String,
+    current_value Float64,
+    expected_value Float64,
+    lower_bound Float64 DEFAULT 0,
+    upper_bound Float64 DEFAULT 0,
+    deviation_score Float64,
+    severity String DEFAULT 'warning',  -- info, warning, critical
+    detection_method String DEFAULT 'zscore',  -- zscore, iqr, forecast
+    is_acknowledged UInt8 DEFAULT 0,
+    acknowledged_by String DEFAULT '',
+    acknowledged_at Nullable(DateTime),
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+ORDER BY (hostname, metric_name, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- SLO Definitions
+CREATE TABLE IF NOT EXISTS slo_definitions (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    service String,
+    description String DEFAULT '',
+    sli_type String DEFAULT 'availability',  -- availability, latency, throughput, custom
+    sli_metric String DEFAULT '',            -- metric name to track
+    sli_good_query String DEFAULT '',        -- query for good events
+    sli_total_query String DEFAULT '',       -- query for total events
+    target Float64,                          -- e.g., 0.999 for 99.9%
+    window_days UInt32 DEFAULT 30,
+    burn_rate_threshold Float64 DEFAULT 10.0,  -- alert if burn rate exceeds
+    enabled UInt8 DEFAULT 1,
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- SLO Status History
+CREATE TABLE IF NOT EXISTS slo_status (
+    id UUID DEFAULT generateUUIDv4(),
+    slo_id UUID,
+    timestamp DateTime DEFAULT now(),
+    current_sli Float64,                  -- 0.0 to 1.0
+    target Float64,
+    error_budget_total Float64,           -- total allowed errors
+    error_budget_remaining Float64,       -- remaining errors allowed
+    error_budget_consumed_pct Float64,    -- percentage used
+    burn_rate Float64,                    -- errors/hour rate
+    burn_rate_1h Float64 DEFAULT 0,
+    burn_rate_6h Float64 DEFAULT 0,
+    is_breached UInt8 DEFAULT 0,
+    events_total UInt64 DEFAULT 0,
+    events_good UInt64 DEFAULT 0,
+    events_bad UInt64 DEFAULT 0
+) ENGINE = MergeTree()
+ORDER BY (slo_id, timestamp)
+TTL timestamp + INTERVAL 90 DAY;
+
+-- Synthetic Monitors Configuration
+CREATE TABLE IF NOT EXISTS synthetic_monitors (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    description String DEFAULT '',
+    url String,
+    method String DEFAULT 'GET',
+    headers String DEFAULT '{}',           -- JSON
+    body String DEFAULT '',
+    expected_status UInt16 DEFAULT 200,
+    expected_body_contains String DEFAULT '',
+    timeout_ms UInt32 DEFAULT 10000,
+    interval_seconds UInt32 DEFAULT 60,
+    locations String DEFAULT '["local"]',  -- JSON array of check locations
+    enabled UInt8 DEFAULT 1,
+    last_check DateTime DEFAULT toDateTime('1970-01-01 00:00:00'),
+    last_status String DEFAULT 'unknown',  -- success, failure, timeout
+    last_latency_ms Float64 DEFAULT 0,
+    consecutive_failures UInt32 DEFAULT 0,
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Synthetic Check Results
+CREATE TABLE IF NOT EXISTS synthetic_results (
+    id UUID DEFAULT generateUUIDv4(),
+    monitor_id UUID,
+    monitor_name String DEFAULT '',
+    timestamp DateTime DEFAULT now(),
+    success UInt8,
+    status_code UInt16 DEFAULT 0,
+    latency_ms Float64,
+    dns_time_ms Float64 DEFAULT 0,
+    connect_time_ms Float64 DEFAULT 0,
+    tls_time_ms Float64 DEFAULT 0,
+    ttfb_ms Float64 DEFAULT 0,            -- time to first byte
+    error_message String DEFAULT '',
+    response_size UInt64 DEFAULT 0,
+    location String DEFAULT 'local'
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (monitor_id, timestamp)
+TTL timestamp + INTERVAL 30 DAY;
+
+-- Alert Incidents (correlated alerts grouped together)
+CREATE TABLE IF NOT EXISTS alert_incidents (
+    id UUID DEFAULT generateUUIDv4(),
+    title String,
+    description String DEFAULT '',
+    status String DEFAULT 'open',          -- open, acknowledged, resolved
+    severity String DEFAULT 'warning',     -- info, warning, critical
+    root_cause String DEFAULT '',
+    affected_hosts String DEFAULT '[]',    -- JSON array
+    affected_services String DEFAULT '[]', -- JSON array
+    alert_ids String DEFAULT '[]',         -- JSON array of alert history IDs
+    alert_count UInt32 DEFAULT 1,
+    first_alert_at DateTime,
+    last_alert_at DateTime,
+    acknowledged_by String DEFAULT '',
+    acknowledged_at Nullable(DateTime),
+    resolved_by String DEFAULT '',
+    resolved_at Nullable(DateTime),
+    resolution_notes String DEFAULT '',
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Incident-Alert Mapping (for tracking which alerts belong to which incident)
+CREATE TABLE IF NOT EXISTS incident_alerts (
+    incident_id UUID,
+    alert_history_id UUID,
+    hostname String DEFAULT '',
+    metric_name String DEFAULT '',
+    added_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+ORDER BY (incident_id, added_at);
