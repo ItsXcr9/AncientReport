@@ -17,6 +17,7 @@ import Dashboards from './pages/Dashboards';
 import DashboardView from './pages/DashboardView';
 import Alerts from './pages/Alerts';
 import RecordingRules from './pages/RecordingRules';
+import SNMPMonitoring from './pages/SNMPMonitoring';
 
 import { SettingsModal } from './components/SettingsModal';
 import { AIChat } from './components/AIChat';
@@ -347,6 +348,7 @@ function App() {
                 <Route path="dashboards/:id" element={<DashboardView />} />
                 <Route path="alerts" element={<Alerts />} />
                 <Route path="recording-rules" element={<RecordingRules />} />
+                <Route path="snmp" element={<SNMPMonitoring />} />
             </Route>
         </Routes>
         

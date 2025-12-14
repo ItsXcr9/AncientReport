@@ -565,3 +565,136 @@ CREATE TABLE IF NOT EXISTS recorded_metrics (
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY (rule_id, timestamp, group_labels)
 TTL timestamp + INTERVAL 90 DAY;
+
+-- ============================================
+-- V7 TABLES: SNMP Monitoring
+-- ============================================
+
+-- SNMP Devices (routers, switches, servers, printers, UPS, etc.)
+CREATE TABLE IF NOT EXISTS snmp_devices (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    ip_address String,
+    snmp_version String DEFAULT 'v2c',  -- 'v1', 'v2c', 'v3'
+    community String DEFAULT 'public',  -- for v1/v2c
+    -- SNMPv3 credentials
+    username String DEFAULT '',
+    auth_protocol String DEFAULT '',    -- MD5, SHA, SHA256
+    auth_password String DEFAULT '',
+    priv_protocol String DEFAULT '',    -- DES, AES, AES256
+    priv_password String DEFAULT '',
+    port UInt16 DEFAULT 161,
+    device_type String DEFAULT 'unknown',   -- router, switch, server, printer, ups, firewall
+    vendor String DEFAULT '',               -- cisco, juniper, hp, dell, apc
+    model String DEFAULT '',
+    sys_descr String DEFAULT '',
+    sys_object_id String DEFAULT '',
+    sys_name String DEFAULT '',
+    sys_location String DEFAULT '',
+    sys_contact String DEFAULT '',
+    sys_uptime UInt64 DEFAULT 0,
+    template_id Nullable(UUID),
+    enabled UInt8 DEFAULT 1,
+    poll_interval UInt32 DEFAULT 60,
+    timeout_ms UInt32 DEFAULT 5000,
+    retries UInt8 DEFAULT 3,
+    last_poll Nullable(DateTime),
+    last_success Nullable(DateTime),
+    status String DEFAULT 'unknown',        -- up, down, degraded, unknown
+    error_message String DEFAULT '',
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- SNMP OID Definitions (what to poll per device)
+CREATE TABLE IF NOT EXISTS snmp_oids (
+    id UUID DEFAULT generateUUIDv4(),
+    device_id UUID,
+    oid String,
+    name String,
+    description String DEFAULT '',
+    mib_name String DEFAULT '',
+    data_type String DEFAULT 'gauge',   -- gauge, counter, counter64, string, timeticks, integer
+    unit String DEFAULT '',             -- %, bytes, bps, packets, etc.
+    multiplier Float64 DEFAULT 1.0,     -- scale factor for value
+    is_delta UInt8 DEFAULT 0,           -- calculate rate of change
+    enabled UInt8 DEFAULT 1,
+    poll_interval UInt32 DEFAULT 60,
+    last_value Float64 DEFAULT 0,
+    last_poll Nullable(DateTime),
+    created_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(created_at)
+ORDER BY (id, device_id);
+
+-- SNMP Device Templates (pre-configured OID sets for common devices)
+CREATE TABLE IF NOT EXISTS snmp_templates (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,
+    vendor String,
+    device_type String,
+    sys_object_id_pattern String DEFAULT '',  -- regex to match sysObjectID
+    description String DEFAULT '',
+    oids String DEFAULT '[]',           -- JSON array of OID definitions
+    icon String DEFAULT 'server',       -- lucide icon name
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- SNMP Polled Metrics (time-series data from polling)
+CREATE TABLE IF NOT EXISTS snmp_metrics (
+    timestamp DateTime,
+    device_id UUID,
+    device_name String,
+    oid String,
+    oid_name String,
+    value Float64,
+    value_string String DEFAULT '',
+    data_type String DEFAULT 'gauge',
+    unit String DEFAULT ''
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (device_id, oid, timestamp)
+TTL timestamp + INTERVAL 90 DAY;
+
+-- SNMP Traps (unsolicited notifications from devices)
+CREATE TABLE IF NOT EXISTS snmp_traps (
+    id UUID DEFAULT generateUUIDv4(),
+    timestamp DateTime DEFAULT now(),
+    source_ip String,
+    device_id Nullable(UUID),
+    device_name String DEFAULT '',
+    trap_oid String,
+    trap_name String DEFAULT '',
+    trap_type String DEFAULT '',        -- linkDown, linkUp, coldStart, etc.
+    enterprise_oid String DEFAULT '',
+    generic_trap Int32 DEFAULT 0,
+    specific_trap Int32 DEFAULT 0,
+    severity String DEFAULT 'info',     -- critical, major, minor, warning, info
+    message String DEFAULT '',
+    varbinds String DEFAULT '{}',       -- JSON of variable bindings
+    acknowledged UInt8 DEFAULT 0,
+    acknowledged_by String DEFAULT '',
+    acknowledged_at Nullable(DateTime),
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (timestamp, source_ip)
+TTL timestamp + INTERVAL 180 DAY;
+
+-- SNMP Interface Table (cached interface info for network devices)
+CREATE TABLE IF NOT EXISTS snmp_interfaces (
+    device_id UUID,
+    if_index UInt32,
+    if_descr String,
+    if_type UInt32,
+    if_mtu UInt32 DEFAULT 0,
+    if_speed UInt64 DEFAULT 0,
+    if_phys_address String DEFAULT '',
+    if_admin_status UInt8 DEFAULT 1,
+    if_oper_status UInt8 DEFAULT 1,
+    if_alias String DEFAULT '',
+    last_updated DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(last_updated)
+ORDER BY (device_id, if_index);

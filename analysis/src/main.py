@@ -85,6 +85,10 @@ app.include_router(metric_alerts_api.router, tags=["V5 Metric Alerts"])
 from api import recording_rules as recording_rules_api
 app.include_router(recording_rules_api.router, tags=["V6 Recording Rules"])
 
+# Register V7 SNMP Monitoring
+from api import snmp as snmp_api
+app.include_router(snmp_api.router, tags=["V7 SNMP Monitoring"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -490,6 +494,15 @@ async def startup_event():
         logger.info("✓ Recording rules evaluator started (10s cycle)")
     except Exception as e:
         logger.warning(f"Could not start recording rules evaluator: {e}")
+    
+    # Start SNMP polling loop and initialize templates
+    try:
+        snmp_api.set_clickhouse_client(clickhouse_client)
+        await snmp_api.initialize_default_templates()
+        await snmp_api.start_polling_loop()
+        logger.info("✓ SNMP monitoring started (polling loop active)")
+    except Exception as e:
+        logger.warning(f"Could not start SNMP monitoring: {e}")
     
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 
