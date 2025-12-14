@@ -121,7 +121,8 @@ export default function Alerts() {
       const res = await fetch(`/api/prometheus/scraped/metrics?target_id=${targetId}`);
       if (res.ok) {
         const data = await res.json();
-        setMetrics(data.metrics || []);
+        const metricNames = (data.metrics || []).map((m: any) => typeof m === 'string' ? m : m.name);
+        setMetrics(metricNames);
       }
     } catch (e) {
       console.error('Failed to fetch metrics:', e);
