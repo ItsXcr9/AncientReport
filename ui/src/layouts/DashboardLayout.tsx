@@ -10,7 +10,8 @@ import {
   ChevronRight,
   Activity,
   LayoutGrid,
-  Bell
+  Bell,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -32,6 +33,7 @@ export function DashboardLayout({ children, header, outletContext }: DashboardLa
     { name: 'Observability', path: '/observability', icon: Activity },
     { name: 'Dashboards', path: '/dashboards', icon: LayoutGrid },
     { name: 'Alerts', path: '/alerts', icon: Bell },
+    { name: 'Recording Rules', path: '/recording-rules', icon: Layers },
     { name: 'Security', path: '/security', icon: Shield },
     { name: 'Analysis', path: '/analysis', icon: Brain },
   ];

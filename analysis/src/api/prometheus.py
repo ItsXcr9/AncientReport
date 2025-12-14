@@ -476,15 +476,66 @@ async def query_scraped_metrics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/scraped/labels")
+async def get_metric_labels(
+    target_id: str,
+    metric_name: str
+):
+    """Get unique label keys and values for a metric"""
+    client = get_clickhouse_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Query to get all unique labels for this metric
+        query = f"""
+            SELECT 
+                labels
+            FROM scraped_metrics
+            WHERE target_id = toUUID('{target_id}')
+              AND metric_name = '{metric_name}'
+              AND timestamp > now() - INTERVAL 1 HOUR
+            GROUP BY labels
+            LIMIT 1000
+        """
+        
+        result = client.client.execute(query)
+        
+        # Aggregate all unique label keys and their values
+        label_values: Dict[str, set] = {}
+        
+        for row in result:
+            try:
+                if row[0]:
+                    labels = json.loads(row[0])
+                    for key, value in labels.items():
+                        if key not in label_values:
+                            label_values[key] = set()
+                        label_values[key].add(value)
+            except:
+                pass
+        
+        # Convert sets to sorted lists
+        labels_response = {}
+        for key, values in label_values.items():
+            labels_response[key] = sorted(list(values))
+        
+        return {"labels": labels_response, "metric_name": metric_name, "target_id": target_id}
+    except Exception as e:
+        logger.error(f"Failed to get labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/scraped/series")
 async def get_metric_series(
     target_id: str,
     metric_name: str,
     start: Optional[str] = None,
     end: Optional[str] = None,
-    step: str = "1m"
+    step: str = "1m",
+    labels: Optional[str] = None,  # JSON string of label filters e.g. {"topic": "my-topic"}
+    aggregation: str = "avg"  # none, sum, avg, max, min
 ):
-    """Get time series data for charting"""
+    """Get time series data for charting with optional label filtering and aggregation"""
     client = get_clickhouse_client()
     if not client:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -559,22 +610,46 @@ async def get_metric_series(
         }
         time_bucket = step_map.get(step, "toStartOfMinute(timestamp)")
         
+        # Build label filter conditions
+        label_conditions = ""
+        if labels:
+            try:
+                label_filters = json.loads(labels)
+                for key, value in label_filters.items():
+                    # Escape single quotes in values
+                    safe_value = str(value).replace("'", "\\'")
+                    label_conditions += f" AND JSONExtractString(labels, '{key}') = '{safe_value}'"
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid labels JSON: {labels}")
+        
+        # Determine aggregation function
+        agg_func = aggregation.lower() if aggregation else "avg"
+        if agg_func not in ("sum", "avg", "max", "min", "none"):
+            agg_func = "avg"
+        
+        if agg_func == "none":
+            # No aggregation - return raw values (but still grouped by time)
+            agg_select = "avg(value)"
+        else:
+            agg_select = f"{agg_func}(value)"
+        
         query = f"""
             SELECT 
                 toString({time_bucket}) as ts,
-                avg(value) as avg_value,
+                {agg_select} as agg_value,
                 min(value) as min_value,
                 max(value) as max_value
             FROM scraped_metrics
-            WHERE target_id = toUUID(%(target_id)s)
-              AND metric_name = %(metric_name)s
-              AND timestamp >= toDateTime(%(start)s)
-              AND timestamp <= toDateTime(%(end)s)
+            WHERE target_id = toUUID('{target_id}')
+              AND metric_name = '{metric_name}'
+              AND timestamp >= toDateTime('{start}')
+              AND timestamp <= toDateTime('{end}')
+              {label_conditions}
             GROUP BY ts
             ORDER BY ts
         """
         
-        result = client.client.execute(query.replace("%(target_id)s", f"'{target_id}'").replace("%(metric_name)s", f"'{metric_name}'").replace("%(start)s", f"'{start}'").replace("%(end)s", f"'{end}'"))
+        result = client.client.execute(query)
         
         data = []
         for row in result:
@@ -585,10 +660,17 @@ async def get_metric_series(
                 "max": row[3]
             })
         
-        return {"data": data, "metric_name": metric_name, "target_id": target_id}
+        return {
+            "data": data, 
+            "metric_name": metric_name, 
+            "target_id": target_id,
+            "aggregation": agg_func,
+            "labels_filter": labels
+        }
     except Exception as e:
         logger.error(f"Failed to get series: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.get("/scraped/metrics")

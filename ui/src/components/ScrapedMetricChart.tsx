@@ -6,9 +6,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, 
-  Tooltip, ResponsiveContainer, Area, AreaChart 
+  Tooltip, ResponsiveContainer, Area, AreaChart, ReferenceLine 
 } from 'recharts';
-import { RefreshCw, TrendingUp, Clock } from 'lucide-react';
+import { RefreshCw, TrendingUp, Clock, Filter, Settings2, Code, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ScrapedMetricChartProps {
   targetId: string;
@@ -18,6 +18,10 @@ interface ScrapedMetricChartProps {
   timeRange?: '1h' | '6h' | '24h' | '7d';
   chartType?: 'line' | 'area';
   height?: number;
+  labelFilters?: Record<string, string>;  // Label key-value filters
+  aggregation?: 'avg' | 'sum' | 'max' | 'min' | 'none';  // Aggregation function
+  threshold?: { value: number; color?: string; label?: string };  // Threshold line
+  showControls?: boolean;  // Show filter/aggregation controls
 }
 
 interface DataPoint {
@@ -27,6 +31,7 @@ interface DataPoint {
   max?: number;
 }
 
+
 export function ScrapedMetricChart({
   targetId,
   metricName,
@@ -34,12 +39,17 @@ export function ScrapedMetricChart({
   color = '#00F3FF',
   timeRange = '1h',
   chartType = 'area',
-  height = 200
+  height = 200,
+  labelFilters,
+  aggregation = 'avg',
+  threshold,
+  showControls = false
 }: ScrapedMetricChartProps) {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [showJson, setShowJson] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -74,8 +84,14 @@ export function ScrapedMetricChart({
         metric_name: metricName,
         start: start.toISOString(),
         end: end.toISOString(),
-        step
+        step,
+        aggregation
       });
+
+      // Add label filters if provided
+      if (labelFilters && Object.keys(labelFilters).length > 0) {
+        params.set('labels', JSON.stringify(labelFilters));
+      }
 
       const response = await fetch(`/api/prometheus/scraped/series?${params}`);
       
@@ -208,6 +224,15 @@ export function ScrapedMetricChart({
             </div>
           </div>
         )}
+        
+        {/* JSON Toggle Button */}
+        <button
+          onClick={() => setShowJson(!showJson)}
+          className={`p-1.5 rounded transition-colors ${showJson ? 'bg-cyan-500/20 text-cyan-400' : 'text-gray-500 hover:text-gray-300'}`}
+          title="Toggle JSON view"
+        >
+          <Code className="w-4 h-4" />
+        </button>
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
@@ -252,6 +277,15 @@ export function ScrapedMetricChart({
               fill={`url(#gradient-${metricName})`}
               isAnimationActive={false}
             />
+            {threshold && (
+              <ReferenceLine 
+                y={threshold.value} 
+                stroke={threshold.color || '#EF4444'} 
+                strokeDasharray="5 5"
+                strokeWidth={2}
+                label={{ value: threshold.label || `Threshold: ${threshold.value}`, fill: threshold.color || '#EF4444', fontSize: 10 }}
+              />
+            )}
           </AreaChart>
         ) : (
           <LineChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -288,6 +322,15 @@ export function ScrapedMetricChart({
               dot={false}
               isAnimationActive={false}
             />
+            {threshold && (
+              <ReferenceLine 
+                y={threshold.value} 
+                stroke={threshold.color || '#EF4444'} 
+                strokeDasharray="5 5"
+                strokeWidth={2}
+                label={{ value: threshold.label || `Threshold: ${threshold.value}`, fill: threshold.color || '#EF4444', fontSize: 10 }}
+              />
+            )}
           </LineChart>
         )}
       </ResponsiveContainer>
@@ -296,6 +339,29 @@ export function ScrapedMetricChart({
         <div className="flex items-center justify-end gap-1 mt-2 text-xs text-gray-500">
           <Clock className="w-3 h-3" />
           Updated {lastUpdate.toLocaleTimeString()}
+        </div>
+      )}
+      
+      {/* JSON View */}
+      {showJson && (
+        <div className="mt-4 border-t border-gray-700/50 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-400">Raw Data ({data.length} points)</span>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+              }}
+              className="text-xs text-gray-500 hover:text-cyan-400"
+            >
+              Copy
+            </button>
+          </div>
+          <pre className="text-xs bg-gray-900/50 rounded-lg p-3 overflow-auto max-h-48 text-gray-300 font-mono">
+            {JSON.stringify(data.slice(-10), null, 2)}
+          </pre>
+          {data.length > 10 && (
+            <p className="text-xs text-gray-500 mt-2 text-center">Showing last 10 of {data.length} points</p>
+          )}
         </div>
       )}
     </motion.div>

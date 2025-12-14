@@ -530,3 +530,38 @@ CREATE TABLE IF NOT EXISTS metric_alert_history (
 ) ENGINE = MergeTree()
 ORDER BY (rule_id, triggered_at)
 TTL triggered_at + INTERVAL 30 DAY;
+
+-- ============================================
+-- V6 TABLES: Recording Rules (Pre-aggregation)
+-- ============================================
+
+-- Recording Rules Configuration
+-- Similar to Prometheus recording rules - pre-aggregate expensive queries
+CREATE TABLE IF NOT EXISTS recording_rules (
+    id UUID DEFAULT generateUUIDv4(),
+    name String,                      -- Unique name for the recorded metric
+    target_id UUID,                   -- Source metric_targets.id
+    source_metric String,             -- Original metric name to aggregate
+    labels_filter String DEFAULT '{}', -- JSON label filters e.g. {"topic": "orders"}
+    aggregation String DEFAULT 'avg', -- sum, avg, max, min
+    group_by String DEFAULT '',       -- Comma-separated label keys to group by
+    interval_seconds Int32 DEFAULT 60,-- Evaluation interval
+    enabled UInt8 DEFAULT 1,
+    description String DEFAULT '',
+    last_evaluated DateTime,
+    created_at DateTime DEFAULT now(),
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id;
+
+-- Recorded Metrics (pre-aggregated time series)
+CREATE TABLE IF NOT EXISTS recorded_metrics (
+    timestamp DateTime,
+    rule_id UUID,
+    rule_name String,
+    group_labels String DEFAULT '{}', -- JSON of group-by label values
+    value Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (rule_id, timestamp, group_labels)
+TTL timestamp + INTERVAL 90 DAY;

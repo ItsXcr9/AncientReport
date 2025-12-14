@@ -81,6 +81,10 @@ from api import alerts as metric_alerts_api
 app.include_router(dashboards_api.router, tags=["V5 Dashboards"])
 app.include_router(metric_alerts_api.router, tags=["V5 Metric Alerts"])
 
+# Register V6 Recording Rules (pre-aggregation)
+from api import recording_rules as recording_rules_api
+app.include_router(recording_rules_api.router, tags=["V6 Recording Rules"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -479,6 +483,13 @@ async def startup_event():
         logger.info("✓ Metric alert evaluator started (30s cycle)")
     except Exception as e:
         logger.warning(f"Could not start alert evaluator: {e}")
+    
+    # Start recording rules evaluator background task
+    try:
+        asyncio.create_task(recording_rules_api.run_recording_rules_evaluator())
+        logger.info("✓ Recording rules evaluator started (10s cycle)")
+    except Exception as e:
+        logger.warning(f"Could not start recording rules evaluator: {e}")
     
     logger.info("🎉 AncientReport AI Analysis Engine is running!")
 
