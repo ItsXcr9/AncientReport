@@ -85,7 +85,7 @@ services:
 
   # Python analysis engine
   analysis:
-    image: ghcr.io/itsxcr9/ancientreport/analysis:latest
+    build: ./analysis
     container_name: AncientReport-analysis
     ports:
       - "6800:8800"
