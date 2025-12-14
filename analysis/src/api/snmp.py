@@ -944,7 +944,8 @@ async def start_polling_loop():
                     WHERE enabled = 1
                 """)
                 
-                now = datetime.utcnow()
+                now = datetime.now()  # Use local time to match ClickHouse
+                logger.debug(f"Polling loop checking {len(result)} devices at {now}")
                 for row in result:
                     device_id = str(row[0])
                     interval = row[1]
@@ -952,6 +953,7 @@ async def start_polling_loop():
                     
                     # Check if due for polling
                     if last_poll is None or (now - last_poll).total_seconds() >= interval:
+                        logger.info(f"Device {device_id} due for poll (last: {last_poll}, interval: {interval}s)")
                         asyncio.create_task(poll_device_task(device_id))
                 
             except Exception as e:
