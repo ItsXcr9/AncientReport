@@ -1,18 +1,34 @@
-"""
-NATS Ingestion Gateway
+"""NATS Ingestion Gateway
 Consumes metrics from NATS JetStream and:
 1. Writes to ClickHouse in batches (persistence)
 2. Broadcasts to WebSocket clients (real-time)
+3. Enforces cardinality limits (Phase 3)
+4. Implements backpressure (Phase 4)
 """
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import msgpack
 from nats.aio.client import Client as NATS
 from nats.js import JetStreamContext
 
 from storage.clickhouse_client import ClickHouseClient
+
+# Try to import cardinality tracker (may not exist on first deploy)
+try:
+    from cardinality.tracker import CardinalityTracker, get_cardinality_tracker
+    CARDINALITY_ENABLED = True
+except ImportError:
+    CARDINALITY_ENABLED = False
+    CardinalityTracker = None
+
+# Try to import internal metrics collector
+try:
+    from api.internal_metrics import get_metrics_collector
+    METRICS_ENABLED = True
+except ImportError:
+    METRICS_ENABLED = False
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)  # Enable DEBUG logging for ingestion gateway
@@ -37,7 +53,34 @@ class IngestionGateway:
         self.nc: NATS = None
         self.js: JetStreamContext = None
         self.batch_buffer: List[dict] = []
-        self.batch_size = 5  # Flush very frequently for testing
+        self.batch_size = 100  # Batch size for efficient writes
+        
+        # === Backpressure Settings (Phase 4) ===
+        self.max_buffer_size = 100_000  # Hard limit - drop if exceeded
+        self.high_watermark = 80_000    # Start slowing down
+        self.low_watermark = 20_000     # Resume normal speed
+        self.backpressure_active = False
+        self.backpressure_delay = 0.1   # Delay in seconds when backpressure active
+        
+        # === Internal Metrics ===
+        self.metrics = {
+            'ingested_total': 0,
+            'dropped_total': 0,
+            'dropped_cardinality': 0,
+            'dropped_backpressure': 0,
+            'buffer_size': 0,
+            'flush_count': 0,
+            'backpressure_events': 0,
+        }
+        
+        # === Cardinality Tracker (Phase 3) ===
+        self.cardinality_tracker: Optional[CardinalityTracker] = None
+        if CARDINALITY_ENABLED:
+            try:
+                self.cardinality_tracker = get_cardinality_tracker()
+                logger.info("✓ Cardinality tracker enabled")
+            except Exception as e:
+                logger.warning(f"Could not initialize cardinality tracker: {e}")
         
     async def connect(self):
         """Connect to NATS JetStream"""
@@ -142,8 +185,38 @@ class IngestionGateway:
                                     if isinstance(metric, dict):
                                         hostname = metric.get('hostname')
                                         if hostname:
+                                            # === Backpressure Check (Phase 4) ===
+                                            if len(self.batch_buffer) >= self.max_buffer_size:
+                                                self.metrics['dropped_backpressure'] += 1
+                                                self.metrics['dropped_total'] += 1
+                                                skipped_count += 1
+                                                continue  # Drop metric
+                                            
+                                            # Activate backpressure if approaching limit
+                                            if len(self.batch_buffer) >= self.high_watermark:
+                                                if not self.backpressure_active:
+                                                    self.backpressure_active = True
+                                                    self.metrics['backpressure_events'] += 1
+                                                    logger.warning(f"⚠️ Backpressure activated - buffer at {len(self.batch_buffer)}/{self.max_buffer_size}")
+                                                await asyncio.sleep(self.backpressure_delay)
+                                            elif len(self.batch_buffer) < self.low_watermark and self.backpressure_active:
+                                                self.backpressure_active = False
+                                                logger.info("✓ Backpressure deactivated")
+                                            
+                                            # === Cardinality Check (Phase 3) ===
+                                            if self.cardinality_tracker:
+                                                should_ingest, reason = await self.cardinality_tracker.check_and_track(metric)
+                                                if not should_ingest:
+                                                    self.metrics['dropped_cardinality'] += 1
+                                                    self.metrics['dropped_total'] += 1
+                                                    skipped_count += 1
+                                                    continue  # Drop high-cardinality metric
+                                            
+                                            # Add to buffer
                                             self.batch_buffer.append(metric)
                                             added_count += 1
+                                            self.metrics['ingested_total'] += 1
+                                            self.metrics['buffer_size'] = len(self.batch_buffer)
                                             logger.debug(f"  ✓ Added metric: {metric.get('metric_name')} from {hostname}")
                                             
                                             # V2: Broadcast to WebSocket clients immediately for real-time updates
@@ -158,6 +231,16 @@ class IngestionGateway:
                                     else:
                                         skipped_count += 1
                                         logger.warning(f"  ✗ Skipping non-dict item: type={type(metric)}")
+                                
+                                # Update internal metrics collector if available
+                                if METRICS_ENABLED:
+                                    try:
+                                        collector = get_metrics_collector()
+                                        collector.set_gauge('buffer_size', len(self.batch_buffer))
+                                        collector.counters['ingested_total'] = self.metrics['ingested_total']
+                                        collector.counters['dropped_total'] = self.metrics['dropped_total']
+                                    except:
+                                        pass
                                 
                                 logger.info(f"📊 Processed list: added={added_count}, skipped={skipped_count}, buffer_size={len(self.batch_buffer)}")
                                                 

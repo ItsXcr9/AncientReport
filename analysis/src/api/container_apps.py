@@ -47,6 +47,102 @@ async def clickhouse_query(query: str) -> List[Dict]:
         return []
 
 
+async def ensure_container_app_tables():
+    """Create ClickHouse tables for container apps if they don't exist."""
+    
+    # Kafka Metrics
+    await clickhouse_query("""
+        CREATE TABLE IF NOT EXISTS kafka_metrics (
+            timestamp DateTime64(3),
+            hostname String,
+            container_name String,
+            container_id String,
+            metric_name String,
+            value Float64,
+            broker_id Nullable(String),
+            consumer_group Nullable(String),
+            topic Nullable(String),
+            partition Nullable(Int32)
+        ) ENGINE = MergeTree()
+        ORDER BY (hostname, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+    """)
+
+    # Redis Metrics
+    await clickhouse_query("""
+        CREATE TABLE IF NOT EXISTS redis_metrics (
+            timestamp DateTime64(3),
+            hostname String,
+            container_name String,
+            container_id String,
+            metric_name String,
+            value Float64,
+            db String
+        ) ENGINE = MergeTree()
+        ORDER BY (hostname, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+    """)
+
+    # PostgreSQL Metrics
+    await clickhouse_query("""
+        CREATE TABLE IF NOT EXISTS postgres_metrics (
+            timestamp DateTime64(3),
+            hostname String,
+            container_name String,
+            container_id String,
+            metric_name String,
+            value Float64,
+            database String
+        ) ENGINE = MergeTree()
+        ORDER BY (hostname, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+    """)
+
+    # NGINX Metrics
+    await clickhouse_query("""
+        CREATE TABLE IF NOT EXISTS nginx_metrics (
+            timestamp DateTime64(3),
+            hostname String,
+            container_name String,
+            container_id String,
+            metric_name String,
+            value Float64
+        ) ENGINE = MergeTree()
+        ORDER BY (hostname, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+    """)
+
+    # MongoDB Metrics
+    await clickhouse_query("""
+        CREATE TABLE IF NOT EXISTS mongo_metrics (
+            timestamp DateTime64(3),
+            hostname String,
+            container_name String,
+            container_id String,
+            metric_name String,
+            value Float64
+        ) ENGINE = MergeTree()
+        ORDER BY (hostname, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+    """)
+
+    # ClickHouse Metrics (monitoring ClickHouse itself)
+    await clickhouse_query("""
+        CREATE TABLE IF NOT EXISTS clickhouse_metrics (
+            timestamp DateTime64(3),
+            hostname String,
+            container_name String,
+            container_id String,
+            metric_name String,
+            value Float64
+        ) ENGINE = MergeTree()
+        ORDER BY (hostname, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+    """)
+    
+    logger.info("✓ Container application metrics tables initialized")
+
+
 # ============================================
 # Kafka Endpoints
 # ============================================

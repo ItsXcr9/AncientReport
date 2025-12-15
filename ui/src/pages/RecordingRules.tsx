@@ -149,6 +149,7 @@ export default function RecordingRules() {
   }, [expandedRuleId]);
 
   const openCreateModal = () => {
+    // Reset all form state safely
     setEditingRule(null);
     setFormName('');
     setFormTargetId('');
@@ -159,6 +160,9 @@ export default function RecordingRules() {
     setFormDescription('');
     setFormLabelsFilter('');
     setMetrics([]);
+    
+    // Explicitly set showModal to true after a small delay to ensure state creates a clean render cycle if needed,
+    // though purely React state updates are batched.
     setShowModal(true);
   };
 
@@ -172,8 +176,11 @@ export default function RecordingRules() {
     setFormInterval(rule.interval_seconds);
     setFormDescription(rule.description);
     setFormLabelsFilter(Object.keys(rule.labels_filter).length > 0 ? JSON.stringify(rule.labels_filter) : '');
+    // Fetch metrics for the existing target so the dropdown populates
+    if (rule.target_id) {
+       fetchMetricsForTarget(rule.target_id);
+    }
     setShowModal(true);
-    fetchMetricsForTarget(rule.target_id);
   };
 
   const handleSubmit = async () => {
@@ -304,12 +311,17 @@ export default function RecordingRules() {
     };
   };
 
-  const COLORS = ['#00F3FF', '#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#F38181'];
+  const COLORS = ['#00F3FF', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#06B6D4'];
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-cyan-500" />
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="relative">
+          <div className="w-12 h-12 rounded-full border-2 border-neon-blue/20 border-t-neon-blue animate-spin" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-2 h-2 bg-neon-blue rounded-full animate-pulse" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -319,41 +331,61 @@ export default function RecordingRules() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Settings className="w-6 h-6 text-cyan-400" />
+          <h1 className="text-3xl font-display font-bold text-white tracking-tight flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-neon-blue/20 to-neon-purple/20 rounded-xl border border-white/5">
+              <Settings className="w-6 h-6 text-neon-blue" />
+            </div>
             Recording Rules
           </h1>
-          <p className="text-gray-400 text-sm mt-1">
-            Pre-aggregate expensive queries for faster dashboard loading
+          <p className="text-gray-400 text-sm mt-2 ml-1">
+            Pre-aggregate expensive queries for ultra-fast dashboard rendering
           </p>
         </div>
         <button
           onClick={openCreateModal}
-          className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg text-white transition-colors"
+          className="group relative flex items-center gap-2 px-5 py-2.5 bg-neon-blue text-black font-bold rounded-xl hover:bg-neon-blue/90 transition-all shadow-[0_0_20px_rgba(0,243,255,0.3)] hover:shadow-[0_0_30px_rgba(0,243,255,0.5)] transform hover:-translate-y-0.5 overflow-hidden"
         >
-          <Plus className="w-4 h-4" />
-          Create Rule
+          <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+          <Plus className="w-5 h-5 relative z-10" />
+          <span className="relative z-10">Create Rule</span>
         </button>
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="flex items-center gap-2 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300">
-          <AlertCircle className="w-5 h-5" />
-          {error}
-          <button onClick={() => setError(null)} className="ml-auto">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 backdrop-blur-sm shadow-lg shadow-red-500/5"
+          >
+            <AlertCircle className="w-5 h-5 text-red-500" />
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto hover:text-white transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Rules List */}
       <div className="space-y-4">
         {rules.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>No recording rules configured</p>
-            <p className="text-sm mt-2">Create a rule to pre-aggregate expensive metrics</p>
+          <div className="glass-card rounded-2xl p-16 text-center border-dashed border-2 border-white/10 bg-black/20">
+            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-white/5 flex items-center justify-center relative overflow-hidden group">
+              <div className="absolute inset-0 bg-gradient-to-tr from-neon-blue/20 to-neon-purple/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <Activity className="w-10 h-10 text-gray-500 group-hover:text-white transition-colors relative z-10" />
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2 font-display">No Rules Configured</h3>
+            <p className="text-gray-400 mb-8 max-w-sm mx-auto">Create a recording rule to pre-calculate complex metrics and speed up your dashboards.</p>
+            <button
+              onClick={openCreateModal}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white font-medium rounded-xl hover:bg-white/20 hover:border-white/30 transition-all hover:scale-105"
+            >
+              <Plus size={18} />
+              Add First Rule
+            </button>
           </div>
         ) : (
           rules.map(rule => (
@@ -361,98 +393,136 @@ export default function RecordingRules() {
               key={rule.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="glass-card rounded-xl overflow-hidden"
+              className="glass-card rounded-xl overflow-hidden group hover:border-neon-blue/30 transition-all duration-300 relative"
             >
-              <div className="p-4">
+               {/* Cyberpunk Glow Border on Hover */}
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-blue/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              
+              <div className="p-5">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-4">
+                      {/* Toggle Switch */}
                       <button
                         onClick={() => handleToggle(rule)}
-                        className={`w-10 h-5 rounded-full relative transition-colors ${
-                          rule.enabled ? 'bg-cyan-500' : 'bg-gray-600'
+                        className={`w-11 h-6 rounded-full relative transition-colors duration-300 flex-shrink-0 ${
+                          rule.enabled 
+                            ? 'bg-neon-blue/20 border border-neon-blue/50 shadow-[0_0_10px_rgba(0,243,255,0.2)]' 
+                            : 'bg-white/5 border border-white/10 hover:border-white/20'
                         }`}
                       >
-                        <span className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${
-                          rule.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                        <span className={`absolute w-4 h-4 rounded-full top-1/2 -translate-y-1/2 transition-all duration-300 shadow-sm ${
+                          rule.enabled 
+                            ? 'left-[22px] bg-neon-blue shadow-[0_0_8px_rgba(0,243,255,0.8)]' 
+                            : 'left-1 bg-gray-500 group-hover:bg-gray-400'
                         }`} />
                       </button>
-                      <h3 className="text-lg font-medium text-white">{rule.name}</h3>
-                      <span className={`px-2 py-0.5 rounded text-xs ${
-                        rule.enabled 
-                          ? 'bg-green-500/20 text-green-400' 
-                          : 'bg-gray-500/20 text-gray-400'
-                      }`}>
-                        {rule.enabled ? 'Active' : 'Disabled'}
-                      </span>
-                    </div>
-                    
-                    {rule.description && (
-                      <p className="text-gray-400 text-sm mt-1">{rule.description}</p>
-                    )}
-                    
-                    <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-400">
-                      <span>Target: <span className="text-gray-300">{getTargetName(rule.target_id)}</span></span>
-                      <span>Metric: <code className="text-cyan-400">{rule.source_metric}</code></span>
-                      <span>Aggregation: <span className="text-orange-400">{rule.aggregation}</span></span>
-                      <span>Interval: <span className="text-gray-300">{rule.interval_seconds}s</span></span>
-                    </div>
-                    
-                    {rule.group_by && (
-                      <div className="text-sm text-gray-400 mt-1">
-                        Group By: <code className="text-purple-400">{rule.group_by}</code>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <h3 className="text-lg font-bold text-white font-display tracking-tight group-hover:text-neon-blue transition-colors truncate">
+                            {rule.name}
+                          </h3>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border flex-shrink-0 ${
+                            rule.enabled 
+                              ? 'bg-neon-green/10 text-neon-green border-neon-green/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]' 
+                              : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                          }`}>
+                            {rule.enabled ? 'Running' : 'Paused'}
+                          </span>
+                        </div>
+                        {rule.description && (
+                          <p className="text-gray-400 text-sm mt-1 font-light truncate">{rule.description}</p>
+                        )}
                       </div>
-                    )}
+                    </div>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
+                      <div className="flex flex-col gap-1 p-2 rounded-lg bg-black/20 border border-white/5">
+                        <span className="text-[10px] uppercase text-gray-500 font-semibold tracking-wider">Target</span>
+                        <span className="text-sm text-gray-200 font-mono truncate" title={getTargetName(rule.target_id)}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-neon-purple inline-block mr-2" />
+                          {getTargetName(rule.target_id)}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-1 p-2 rounded-lg bg-black/20 border border-white/5">
+                        <span className="text-[10px] uppercase text-gray-500 font-semibold tracking-wider">Source Metric</span>
+                        <span className="text-sm text-neon-blue font-mono truncate" title={rule.source_metric}>
+                          {rule.source_metric}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-1 p-2 rounded-lg bg-black/20 border border-white/5">
+                        <span className="text-[10px] uppercase text-gray-500 font-semibold tracking-wider">Aggregation</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-orange-400 font-mono font-bold uppercase">{rule.aggregation}</span>
+                          <span className="text-xs text-gray-500">every {rule.interval_seconds}s</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1 p-2 rounded-lg bg-black/20 border border-white/5">
+                         <span className="text-[10px] uppercase text-gray-500 font-semibold tracking-wider">Grouping</span>
+                         <span className="text-sm text-gray-300 font-mono truncate">
+                           {rule.group_by ? rule.group_by : <span className="text-gray-600 italic">None</span>}
+                         </span>
+                      </div>
+                    </div>
                     
                     {Object.keys(rule.labels_filter).length > 0 && (
-                      <div className="text-sm text-gray-400 mt-1">
-                        Labels: <code className="text-yellow-400">{JSON.stringify(rule.labels_filter)}</code>
-                      </div>
-                    )}
-                    
-                    {rule.last_evaluated && rule.last_evaluated !== '1970-01-01T03:30:00' && (
-                      <div className="flex items-center gap-1 mt-2 text-xs text-gray-500">
-                        <Clock className="w-3 h-3" />
-                        Last evaluated: {new Date(rule.last_evaluated).toLocaleString()}
+                      <div className="mt-3 flex items-center gap-2 text-xs font-mono text-gray-500 ml-1">
+                        <span className="text-neon-purple">FILTER</span>
+                        <code className="bg-white/5 px-2 py-0.5 rounded border border-white/5 text-gray-300">
+                           {JSON.stringify(rule.labels_filter)}
+                        </code>
                       </div>
                     )}
                   </div>
                   
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => toggleChart(rule.id)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        expandedRuleId === rule.id 
-                          ? 'text-cyan-400 bg-cyan-500/10' 
-                          : 'text-gray-400 hover:text-cyan-400 hover:bg-cyan-500/10'
-                      }`}
-                      title="View Results"
-                    >
-                      <BarChart3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleEvaluate(rule.id)}
-                      className="p-2 text-gray-400 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors"
-                      title="Evaluate now"
-                    >
-                      <Play className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => openEditModal(rule)}
-                      className="p-2 text-gray-400 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition-colors"
-                      title="Edit"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(rule.id)}
-                      className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div className="flex flex-col gap-2 ml-4">
+                     <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
+                      <button
+                        onClick={() => toggleChart(rule.id)}
+                        className={`p-2 rounded-lg transition-all ${
+                          expandedRuleId === rule.id 
+                            ? 'bg-neon-blue text-black shadow-[0_0_15px_rgba(0,243,255,0.4)]' 
+                            : 'text-gray-400 hover:text-white hover:bg-white/10'
+                        }`}
+                        title="Visualize Data"
+                      >
+                         {expandedRuleId === rule.id ? <ChevronUp className="w-4 h-4" /> : <BarChart3 className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => handleEvaluate(rule.id)}
+                        className="p-2 text-gray-400 hover:text-neon-green hover:bg-neon-green/10 rounded-lg transition-colors group/play"
+                        title="Evaluate Now"
+                      >
+                        <Play className="w-4 h-4 group-hover/play:fill-neon-green transition-colors" />
+                      </button>
+                    </div>
+                    
+                    <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
+                       <button
+                        onClick={() => openEditModal(rule)}
+                        className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                        title="Edit Rule"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(rule.id)}
+                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                        title="Delete Rule"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
+                
+                {rule.last_evaluated && rule.last_evaluated !== '1970-01-01T03:30:00' && (
+                  <div className="flex items-center justify-end gap-1.5 mt-2 text-[10px] text-gray-500 font-mono opacity-70">
+                    <Clock className="w-3 h-3" />
+                    Last evaluated: {new Date(rule.last_evaluated).toLocaleString()}
+                  </div>
+                )}
               </div>
               
               {/* Chart Section */}
@@ -462,50 +532,79 @@ export default function RecordingRules() {
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: 'auto', opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-gray-700/50"
+                    className="border-t border-white/10 bg-black/40"
                   >
-                    <div className="p-4">
+                    <div className="p-5">
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-medium text-gray-300">Pre-aggregated Results (Last Hour)</h4>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 pl-1">
+                          <Activity className="w-3 h-3 text-neon-blue" />
+                          Evaluation Results (Last 1h)
+                        </h4>
                         <button 
                           onClick={() => fetchChartData(rule.id)}
-                          className="text-xs text-gray-500 hover:text-cyan-400 flex items-center gap-1"
+                          className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-400 hover:text-white hover:border-neon-blue/50 flex items-center gap-2 transition-all"
                         >
-                          <RefreshCw className="w-3 h-3" /> Refresh
+                          <RefreshCw className={`w-3 h-3 ${chartLoading ? 'animate-spin' : ''}`} /> 
+                          Refresh Data
                         </button>
                       </div>
                       
                       {chartLoading ? (
                         <div className="flex items-center justify-center h-48">
-                          <RefreshCw className="w-6 h-6 animate-spin text-cyan-500" />
+                          <div className="flex flex-col items-center gap-3">
+                             <RefreshCw className="w-8 h-8 animate-spin text-neon-blue/50" />
+                             <span className="text-xs text-neon-blue/70 font-mono animate-pulse">LOADING METRICS...</span>
+                          </div>
                         </div>
                       ) : chartData.length === 0 ? (
-                        <div className="flex items-center justify-center h-48 text-gray-500">
+                        <div className="flex items-center justify-center h-48 text-gray-500 bg-white/5 rounded-xl border border-dashed border-white/10 mx-1">
                           <div className="text-center">
-                            <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">No data yet</p>
-                            <p className="text-xs mt-1">Wait for evaluations or click "Evaluate now"</p>
+                            <Activity className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                            <p className="text-sm font-medium text-gray-400">No recorded data found</p>
+                            <p className="text-xs mt-1 text-gray-600">Wait for the next evaluation cycle or trigger it manually.</p>
                           </div>
                         </div>
                       ) : (
-                        <div className="h-64">
+                        <div className="h-64 w-full">
                           <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={processChartData().data}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                              <defs>
+                                <linearGradient id="grid-gradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="rgba(255,255,255,0.1)" />
+                                  <stop offset="95%" stopColor="rgba(255,255,255,0)" />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                               <XAxis 
                                 dataKey="time" 
-                                stroke="#9CA3AF" 
-                                fontSize={11}
+                                stroke="#64748b" 
+                                fontSize={10} 
+                                tickLine={false}
+                                axisLine={false}
+                                dy={10}
+                                fontFamily="JetBrains Mono"
                               />
-                              <YAxis stroke="#9CA3AF" fontSize={11} />
+                              <YAxis 
+                                stroke="#64748b" 
+                                fontSize={10} 
+                                tickLine={false}
+                                axisLine={false}
+                                dx={-10}
+                                fontFamily="JetBrains Mono"
+                              />
                               <Tooltip 
                                 contentStyle={{ 
-                                  backgroundColor: '#1F2937', 
-                                  border: '1px solid #374151',
-                                  borderRadius: '8px'
+                                  backgroundColor: 'rgba(10, 15, 25, 0.95)', 
+                                  border: '1px solid rgba(0, 243, 255, 0.2)',
+                                  borderRadius: '12px',
+                                  boxShadow: '0 10px 40px -10px rgba(0,0,0,0.8)',
+                                  fontSize: '12px',
+                                  padding: '12px'
                                 }} 
+                                itemStyle={{ padding: '2px 0', fontFamily: 'JetBrains Mono' }}
+                                labelStyle={{ color: '#94a3b8', marginBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '4px' }}
                               />
-                              <Legend />
+                              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px', fontFamily: 'JetBrains Mono' }} iconType="circle" />
                               {processChartData().labels.map((label, idx) => (
                                 <Line
                                   key={label}
@@ -514,6 +613,8 @@ export default function RecordingRules() {
                                   stroke={COLORS[idx % COLORS.length]}
                                   strokeWidth={2}
                                   dot={false}
+                                  activeDot={{ r: 4, strokeWidth: 0, fill: '#fff' }}
+                                  animationDuration={1000}
                                 />
                               ))}
                             </LineChart>
@@ -536,148 +637,167 @@ export default function RecordingRules() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"
             onClick={() => setShowModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="glass-card-intense rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl relative"
               onClick={e => e.stopPropagation()}
             >
-              <h2 className="text-xl font-bold text-white mb-4">
-                {editingRule ? 'Edit Recording Rule' : 'Create Recording Rule'}
-              </h2>
+              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-neon-blue via-neon-purple to-neon-blue" />
               
-              <div className="space-y-4">
+              <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0f1117]/95 backdrop-blur-xl z-10">
+                <h2 className="text-xl font-bold text-white flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-neon-blue/10 border border-neon-blue/20 flex items-center justify-center shadow-[0_0_15px_rgba(0,243,255,0.15)]">
+                    {editingRule ? <Edit2 className="w-5 h-5 text-neon-blue" /> : <Plus className="w-5 h-5 text-neon-blue" />}
+                  </div>
+                  <span className="font-display tracking-tight">{editingRule ? 'Edit Recording Rule' : 'Create New Rule'}</span>
+                </h2>
+                <button 
+                  onClick={() => setShowModal(false)} 
+                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-6">
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Rule Name *</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Rule Name</label>
                   <input
                     type="text"
                     value={formName}
                     onChange={e => setFormName(e.target.value)}
                     placeholder="e.g., kafka_lag_sum_by_topic"
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all placeholder-gray-600 shadow-inner"
                   />
+                  <p className="text-xs text-gray-500 mt-2 ml-1 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-neon-blue"></span>
+                    Unique identifier used in ClickHouse tables
+                  </p>
                 </div>
                 
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Target * ({targets.length} available)</label>
-                  <select
-                    value={formTargetId}
-                    onChange={e => {
-                      setFormTargetId(e.target.value);
-                      setFormSourceMetric(''); // Reset metric when target changes
-                    }}
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="">Select a target...</option>
-                    {targets.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.url})</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">
-                    Source Metric * {metricsLoading && <span className="text-cyan-400">(loading...)</span>}
-                    {!metricsLoading && formTargetId && <span className="text-gray-500">({metrics.length} available)</span>}
-                  </label>
-                  <select
-                    value={formSourceMetric}
-                    onChange={e => setFormSourceMetric(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 disabled:opacity-50"
-                    disabled={!formTargetId || metricsLoading}
-                  >
-                    <option value="">
-                      {!formTargetId 
-                        ? 'Select a target first...' 
-                        : metricsLoading 
-                          ? 'Loading metrics...' 
-                          : 'Select a metric...'}
-                    </option>
-                    {metrics.map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">Aggregation</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Target</label>
                     <select
-                      value={formAggregation}
-                      onChange={e => setFormAggregation(e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                      value={formTargetId}
+                      onChange={e => {
+                        setFormTargetId(e.target.value);
+                        setFormSourceMetric(''); // Reset metric when target changes
+                      }}
+                      className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all appearance-none cursor-pointer hover:bg-white/5"
                     >
-                      <option value="avg">Average (avg)</option>
-                      <option value="sum">Sum (sum)</option>
-                      <option value="max">Maximum (max)</option>
-                      <option value="min">Minimum (min)</option>
+                      <option value="">Select target</option>
+                      {targets.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">
+                      Metric
+                      {metricsLoading && <span className="ml-2 text-neon-blue text-[10px] animate-pulse">LOADING...</span>}
+                    </label>
+                    <select
+                      value={formSourceMetric}
+                      onChange={e => setFormSourceMetric(e.target.value)}
+                      className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all appearance-none cursor-pointer disabled:opacity-50 hover:bg-white/5"
+                      disabled={!formTargetId || metricsLoading}
+                    >
+                      <option value="">Select metric</option>
+                      {metrics.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Aggregation</label>
+                    <div className="relative">
+                      <select
+                        value={formAggregation}
+                        onChange={e => setFormAggregation(e.target.value)}
+                        className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all appearance-none cursor-pointer hover:bg-white/5"
+                      >
+                        <option value="avg">Average (avg)</option>
+                        <option value="sum">Sum (sum)</option>
+                        <option value="max">Maximum (max)</option>
+                        <option value="min">Minimum (min)</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+                    </div>
                   </div>
                   
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">Interval (seconds)</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Interval (s)</label>
                     <input
                       type="number"
                       value={formInterval}
                       onChange={e => setFormInterval(Number(e.target.value))}
                       min={10}
-                      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                      className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all shadow-inner"
                     />
                   </div>
                 </div>
                 
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Group By (comma-separated label keys)</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Group By Labels</label>
                   <input
                     type="text"
                     value={formGroupBy}
                     onChange={e => setFormGroupBy(e.target.value)}
-                    placeholder="e.g., topic, partition"
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                    placeholder="topic, partition"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all placeholder-gray-600 font-mono text-sm shadow-inner"
                   />
+                  <p className="text-xs text-gray-500 mt-2 ml-1 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-gray-500"></span>
+                    Comma-separated keys (e.g. topic, partition)
+                  </p>
                 </div>
                 
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Labels Filter (JSON)</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Filter Labels (JSON)</label>
                   <input
                     type="text"
                     value={formLabelsFilter}
                     onChange={e => setFormLabelsFilter(e.target.value)}
-                    placeholder='{"topic": "orders"}'
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                    placeholder='{"env": "prod"}'
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all placeholder-gray-600 font-mono text-sm shadow-inner"
                   />
                 </div>
                 
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Description</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1">Description</label>
                   <textarea
                     value={formDescription}
                     onChange={e => setFormDescription(e.target.value)}
-                    placeholder="What does this rule aggregate?"
-                    rows={2}
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 resize-none"
+                    placeholder="Explain the purpose of this rule..."
+                    rows={3}
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/50 transition-all placeholder-gray-600 resize-none shadow-inner"
                   />
                 </div>
               </div>
               
-              <div className="flex justify-end gap-3 mt-6">
+              <div className="p-6 border-t border-white/10 flex justify-end gap-4 bg-black/20 backdrop-blur-sm">
                 <button
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                  className="px-6 py-3 text-sm font-bold text-gray-400 hover:text-white transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={!formName || !formTargetId || !formSourceMetric}
-                  className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg text-white transition-colors"
+                  className="flex items-center gap-2 px-8 py-3 bg-neon-blue text-black font-bold rounded-xl hover:bg-neon-blue/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_20px_rgba(0,243,255,0.3)] hover:shadow-[0_0_30px_rgba(0,243,255,0.5)] transform hover:-translate-y-0.5"
                 >
                   <Check className="w-4 h-4" />
-                  {editingRule ? 'Update' : 'Create'}
+                  {editingRule ? 'Save Changes' : 'Create Rule'}
                 </button>
               </div>
             </motion.div>

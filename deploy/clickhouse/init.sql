@@ -14,7 +14,8 @@ PARTITION BY toYYYYMM(timestamp)
 ORDER BY (hostname, metric_type, timestamp)
 TTL timestamp + INTERVAL 90 DAY;
 
--- Hourly analysis reports
+-- Hourly analysis reports (AI insights, top processes, etc.)
+-- 3-day retention for quick access to recent analysis
 CREATE TABLE IF NOT EXISTS hourly_reports (
     report_id String,
     timestamp DateTime,
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS hourly_reports (
     capacity_forecast String  -- JSON
 ) ENGINE = MergeTree()
 ORDER BY (hostname, timestamp)
-TTL timestamp + INTERVAL 1 YEAR;
+TTL timestamp + INTERVAL 3 DAY;
 
 -- Daily analysis reports
 CREATE TABLE IF NOT EXISTS daily_reports (
@@ -334,8 +335,10 @@ ORDER BY (hostname, timestamp)
 TTL timestamp + INTERVAL 90 DAY;
 
 -- Security Scan Results (vulnerability scans)
+-- 3-day retention for quick access to recent scans
 CREATE TABLE IF NOT EXISTS security_scan_results (
     id String,
+    timestamp DateTime DEFAULT now(),
     target String,
     scan_type String,
     status String,
@@ -343,9 +346,11 @@ CREATE TABLE IF NOT EXISTS security_scan_results (
     completed_at Nullable(String),
     vulnerabilities String,  -- JSON array of vulnerabilities
     score UInt8,
-    error String DEFAULT ''
-) ENGINE = ReplacingMergeTree()
-ORDER BY (id, started_at);
+    error String DEFAULT '',
+    hostname String DEFAULT ''
+) ENGINE = MergeTree()
+ORDER BY (hostname, timestamp, id)
+TTL timestamp + INTERVAL 3 DAY;
 
 -- Security Events & Alerts
 CREATE TABLE IF NOT EXISTS security_events (
@@ -842,3 +847,75 @@ CREATE TABLE IF NOT EXISTS incident_alerts (
     added_at DateTime DEFAULT now()
 ) ENGINE = MergeTree()
 ORDER BY (incident_id, added_at);
+
+-- ============================================
+-- Production Readiness Tables
+-- ============================================
+
+-- Counter state tracking for reset detection (Phase 1)
+-- Tracks the last known value of counter metrics to detect resets
+CREATE TABLE IF NOT EXISTS counter_state (
+    hostname String,
+    metric_name String,
+    last_value Float64,
+    last_timestamp DateTime,
+    reset_count UInt32 DEFAULT 0,
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (hostname, metric_name);
+
+-- Histogram bucket storage for quantile calculations (Phase 2)
+CREATE TABLE IF NOT EXISTS histogram_metrics (
+    timestamp DateTime,
+    hostname String,
+    metric_name String,
+    le Float64,  -- bucket upper bound (less than or equal)
+    count UInt64,  -- cumulative count
+    tags Map(String, String)
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (hostname, metric_name, le, timestamp)
+TTL timestamp + INTERVAL 90 DAY;
+
+-- Cardinality limits for explosion prevention (Phase 3)
+CREATE TABLE IF NOT EXISTS cardinality_limits (
+    scope String,  -- 'global', 'hostname', 'metric'
+    scope_value String,  -- hostname or metric name, '*' for default
+    max_series UInt32,
+    current_series UInt32 DEFAULT 0,
+    action String DEFAULT 'drop',  -- 'drop', 'sample', 'alert'
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (scope, scope_value);
+
+-- Insert default cardinality limits
+INSERT INTO cardinality_limits (scope, scope_value, max_series, action) VALUES
+    ('global', '*', 1000000, 'alert'),
+    ('hostname', '*', 50000, 'drop'),
+    ('metric', '*', 10000, 'sample')
+ON DUPLICATE KEY UPDATE scope = scope;
+
+-- Internal metrics for self-monitoring (Phase 5)
+CREATE TABLE IF NOT EXISTS internal_metrics (
+    timestamp DateTime DEFAULT now(),
+    component String,  -- 'ingestion', 'analysis', 'alerts', 'scraper'
+    metric_name String,
+    value Float64,
+    labels Map(String, String)
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (component, metric_name, timestamp)
+TTL timestamp + INTERVAL 7 DAY;
+
+-- Alert state persistence for surviving restarts (Phase 6)
+CREATE TABLE IF NOT EXISTS alert_state (
+    rule_id UUID,
+    state String DEFAULT 'inactive',  -- 'inactive', 'pending', 'firing', 'resolved'
+    pending_count UInt8 DEFAULT 0,    -- For flapping protection
+    started_at Nullable(DateTime),
+    last_value Float64 DEFAULT 0,
+    last_evaluated DateTime DEFAULT now(),
+    annotations String DEFAULT '{}',  -- JSON
+    updated_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY rule_id;

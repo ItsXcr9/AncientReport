@@ -304,13 +304,17 @@ impl DockerCollector {
         -> Result<(String, String, u32, String), Box<dyn std::error::Error>> {
         
         // Check if container has a healthcheck configured
+        // Use defensive template: if .State.Health exists, get Status; otherwise return "none"
         let health_status_output = Command::new(&self.docker_path)
-            .args(&["inspect", container_id, "--format", "{{.State.Health.Status}}"])
+            .args(&["inspect", container_id, "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"])
             .output()?;
 
         if !health_status_output.status.success() {
             let stderr = String::from_utf8_lossy(&health_status_output.stderr);
-            warn!("Failed to inspect health status for {}: {}", container_id, stderr);
+            // Only log at debug level since this is expected for containers without health checks
+            if !stderr.contains("template") {
+                warn!("Failed to inspect health status for {}: {}", container_id, stderr);
+            }
             return Ok(("none".to_string(), String::new(), 0, String::new()));
         }
 

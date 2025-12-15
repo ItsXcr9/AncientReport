@@ -338,19 +338,22 @@ async def _evaluate_rule(client, rule: dict) -> float:
                 safe_value = str(value).replace("'", "\\'")
                 label_conditions += f" AND JSONExtractString(labels, '{key}') = '{safe_value}'"
         
-        # Build group by clause
+        # Build group by clause - ONLY include actual dimension columns, NOT aggregates
         group_by_select = ""
         group_by_clause = ""
         if group_by:
             group_keys = [k.strip() for k in group_by.split(",") if k.strip()]
             if group_keys:
                 group_by_select = ", " + ", ".join([f"JSONExtractString(labels, '{k}') as {k}" for k in group_keys])
-                group_by_clause = ", " + ", ".join(group_keys)
+                # GROUP BY the extracted label columns, not positional references that might be aggregates
+                group_by_clause = "GROUP BY " + ", ".join([f"JSONExtractString(labels, '{k}')" for k in group_keys])
         
         # Query the source data (last minute)
         end = datetime.now()
         start = end - timedelta(minutes=1)
         
+        # Build the query - note: if no group_by, we just aggregate with no GROUP BY clause
+        # If group_by exists, GROUP BY the dimension columns ONLY (not the aggregate)
         query = f"""
             SELECT 
                 {aggregation}(value) as agg_value
@@ -361,7 +364,7 @@ async def _evaluate_rule(client, rule: dict) -> float:
               AND timestamp >= toDateTime('{start.strftime('%Y-%m-%d %H:%M:%S')}')
               AND timestamp <= toDateTime('{end.strftime('%Y-%m-%d %H:%M:%S')}')
               {label_conditions}
-            GROUP BY 1 {group_by_clause}
+            {group_by_clause}
         """
         
         result = client.client.execute(query)

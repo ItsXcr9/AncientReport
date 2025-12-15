@@ -56,6 +56,14 @@ services:
     container_name: AncientReport-analysis
     ports:
       - "6800:8800"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    deploy:
+      resources:
+        limits:
+          memory: 6G
     environment:
       TZ: Asia/Tehran
       CLICKHOUSE_HOST: clickhouse

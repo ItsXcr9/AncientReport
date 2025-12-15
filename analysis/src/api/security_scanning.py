@@ -348,9 +348,10 @@ async def save_scan_to_clickhouse(scan: SecurityScanResult) -> bool:
     hostname_str = sql_escape(clean_string(scan.hostname)) if scan.hostname else ""
     
     query = f"""
-    INSERT INTO security_scan_results (id, target, scan_type, status, started_at, completed_at, vulnerabilities, score, error, hostname)
+    INSERT INTO security_scan_results (id, timestamp, target, scan_type, status, started_at, completed_at, vulnerabilities, score, error, hostname)
     VALUES (
         '{sql_escape(clean_string(scan.id))}',
+        now(),
         '{sql_escape(clean_string(scan.target))}',
         '{scan.scan_type}',
         '{scan.status}',

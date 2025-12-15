@@ -99,6 +99,14 @@ app.include_router(slo_api.router, tags=["V8 SLO Tracking"])
 app.include_router(synthetics_api.router, tags=["V8 Synthetic Monitoring"])
 app.include_router(incidents_api.router, tags=["V8 Alert Incidents"])
 
+# Register V9 Rate Query Functions (PromQL-equivalent rate/irate/increase/delta)
+from api import rate_query as rate_query_api
+app.include_router(rate_query_api.router, tags=["V9 Rate Queries"])
+
+# Register V10 Internal Metrics & Self-Monitoring
+from api import internal_metrics as internal_metrics_api
+app.include_router(internal_metrics_api.router, tags=["V10 Internal Metrics"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -331,6 +339,9 @@ async def startup_event():
     # Initialize ClickHouse tables for network metrics
     await ebpf_api.ensure_network_metrics_tables()
     
+    # Initialize ClickHouse tables for container apps
+    await container_apps_api.ensure_container_app_tables()
+    
     # Initialize AI engine
     ai_provider = os.getenv("AI_PROVIDER", "google")
     ai_model = os.getenv("AI_MODEL", "gemini-2.5-flash-lite")
@@ -406,6 +417,17 @@ async def startup_event():
         replace_existing=True
     )
     logger.info("✓ Scheduled network metrics collection (every 30 seconds)")
+    
+    # Schedule HTTP client refresh (every 6 hours to prevent FD leaks)
+    scheduler.add_job(
+        refresh_http_clients,
+        'interval',
+        hours=6,
+        id='http_client_refresh',
+        name='HTTP Client Refresh',
+        replace_existing=True
+    )
+    logger.info("✓ Scheduled HTTP client refresh (every 6 hours)")
     
     scheduler.start()
     logger.info("✓ Scheduler started")
@@ -550,6 +572,23 @@ async def shutdown_event():
         scheduler.shutdown()
     if ingestion_gateway and hasattr(ingestion_gateway, 'nc') and ingestion_gateway.nc:
         await ingestion_gateway.nc.close()
+    
+    # Clean up HTTP clients to prevent connection leaks
+    try:
+        from api.prometheus import close_http_client as close_prometheus_client
+        await close_prometheus_client()
+        logger.info("Closed Prometheus HTTP client")
+    except Exception as e:
+        logger.warning(f"Failed to close Prometheus HTTP client: {e}")
+    
+    try:
+        from api.synthetics import _http_client as synthetics_client
+        if synthetics_client:
+            await synthetics_client.aclose()
+            logger.info("Closed Synthetics HTTP client")
+    except Exception as e:
+        logger.warning(f"Failed to close Synthetics HTTP client: {e}")
+    
     logger.info("👋 Shutdown complete")
 
 
@@ -664,6 +703,40 @@ async def cleanup_old_data():
             logger.debug(f"  - Skipped {table}: {e}")
     
     logger.info(f"✅ Data cleanup complete (retention: {DATA_RETENTION_DAYS} days)")
+
+
+async def refresh_http_clients():
+    """Periodically refresh HTTP clients to prevent connection pool exhaustion.
+    
+    This helps prevent file descriptor leaks from accumulated connections
+    that may not be properly released over time.
+    """
+    try:
+        logger.info("🔄 Refreshing HTTP clients to prevent connection leaks...")
+        
+        # Refresh Prometheus HTTP client
+        try:
+            from api.prometheus import close_http_client as close_prometheus, get_http_client as get_prometheus
+            await close_prometheus()
+            await get_prometheus()  # Re-create the client
+            logger.info("  ✓ Refreshed Prometheus HTTP client")
+        except Exception as e:
+            logger.warning(f"  - Failed to refresh Prometheus client: {e}")
+        
+        # Refresh Synthetics HTTP client
+        try:
+            from api import synthetics
+            if synthetics._http_client:
+                await synthetics._http_client.aclose()
+                synthetics._http_client = None
+            await synthetics.get_http_client()  # Re-create
+            logger.info("  ✓ Refreshed Synthetics HTTP client")
+        except Exception as e:
+            logger.warning(f"  - Failed to refresh Synthetics client: {e}")
+        
+        logger.info("✅ HTTP clients refreshed successfully")
+    except Exception as e:
+        logger.error(f"❌ HTTP client refresh failed: {e}")
 
 
 async def get_storage_stats():

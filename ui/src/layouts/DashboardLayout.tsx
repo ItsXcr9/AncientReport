@@ -12,7 +12,8 @@ import {
   LayoutGrid,
   Bell,
   Layers,
-  Network
+  Network,
+  HeartPulse
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -38,6 +39,7 @@ export function DashboardLayout({ children, header, outletContext }: DashboardLa
     { name: 'Recording Rules', path: '/recording-rules', icon: Layers },
     { name: 'Security', path: '/security', icon: Shield },
     { name: 'Analysis', path: '/analysis', icon: Brain },
+    { name: 'System Health', path: '/system-health', icon: HeartPulse },
   ];
 
 
@@ -56,8 +58,8 @@ export function DashboardLayout({ children, header, outletContext }: DashboardLa
         <div className="h-16 flex items-center justify-center border-b border-white/10 overflow-hidden relative">
           <div className={`flex items-center gap-3 ${isSidebarOpen ? 'px-6 w-full' : 'px-0 justify-center'}`}>
             <div className="relative flex-shrink-0">
-               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-neon-blue to-neon-purple flex items-center justify-center shadow-lg shadow-neon-blue/20">
-                  <span className="font-bold text-white text-lg font-display">A</span>
+               <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-neon-blue/20">
+                  <span className="font-bold text-white text-lg font-display">Xcr9</span>
                </div>
             </div>
             <AnimatePresence mode="wait">

@@ -597,19 +597,160 @@ class HourlyAnalyzer:
             return insights
             
         except Exception as e:
-            logger.error(f"Failed to generate AI insights: {e}", exc_info=True)
-            logger.error(f"Exception type: {type(e).__name__}")
-            logger.error(f"Exception args: {e.args}")
-            return {
-                "critical_alerts": [],
-                "recommendations": [{
-                    "title": "AI analysis unavailable",
-                    "description": f"Error: {str(e)[:200]}",
+            error_str = str(e).lower()
+            error_msg = str(e)[:300]
+            
+            # Classify the error type
+            if 'api_key' in error_str or 'api key' in error_str or 'invalid' in error_str or 'expired' in error_str:
+                error_type = "API_KEY_ERROR"
+                logger.error(f"AI API key issue: {e}")
+            elif '429' in error_str or 'rate limit' in error_str or 'quota' in error_str:
+                error_type = "RATE_LIMIT"
+                logger.error(f"AI rate limit exceeded: {e}")
+            elif 'timeout' in error_str or 'timed out' in error_str:
+                error_type = "TIMEOUT"
+                logger.error(f"AI request timed out: {e}")
+            else:
+                error_type = "UNKNOWN"
+                logger.error(f"Failed to generate AI insights: {e}", exc_info=True)
+            
+            logger.error(f"Exception type: {type(e).__name__}, Error type: {error_type}")
+            
+            # Generate metrics-based fallback recommendations
+            fallback_recommendations = self._generate_fallback_recommendations(context)
+            
+            # Add error notification as first recommendation
+            if error_type == "API_KEY_ERROR":
+                fallback_recommendations.insert(0, {
+                    "title": "⚠️ AI Analysis Disabled - API Key Issue",
+                    "description": "The AI analysis API key is invalid or expired. Please update GEMINI_API_KEY in your configuration. Showing metrics-based insights instead.",
                     "priority": "high"
-                }],
-                "capacity_forecast": {},
-                "config_optimizations": []
+                })
+            elif error_type == "RATE_LIMIT":
+                fallback_recommendations.insert(0, {
+                    "title": "⚠️ AI Analysis Rate Limited",
+                    "description": "AI analysis is temporarily unavailable due to rate limiting. Will retry on next analysis cycle. Showing metrics-based insights instead.",
+                    "priority": "medium"
+                })
+            else:
+                fallback_recommendations.insert(0, {
+                    "title": "⚠️ AI Analysis Temporarily Unavailable",
+                    "description": f"AI analysis encountered an error: {error_msg}. Showing metrics-based insights instead.",
+                    "priority": "medium"
+                })
+            
+            return {
+                "critical_alerts": self._generate_fallback_alerts(context),
+                "recommendations": fallback_recommendations,
+                "capacity_forecast": self._generate_fallback_forecast(context),
+                "config_optimizations": [],
+                "_error_type": error_type,
+                "_ai_available": False
             }
+    
+    def _generate_fallback_recommendations(self, context: Dict) -> List[Dict]:
+        """Generate useful recommendations based on metrics when AI is unavailable"""
+        recommendations = []
+        
+        cpu_avg = context.get('cpu_avg', 0)
+        memory_pct = context.get('memory_percent', 0)
+        disk_latency = context.get('disk_latency_ms', 0)
+        packet_drops = context.get('packet_drops', 0)
+        
+        # CPU-based recommendations
+        if cpu_avg > 80:
+            recommendations.append({
+                "title": "High CPU Utilization Detected",
+                "description": f"CPU usage is at {cpu_avg:.1f}% average. Consider: 1) Identifying CPU-intensive processes, 2) Scaling up CPU resources, 3) Optimizing application code or queries.",
+                "priority": "high"
+            })
+        elif cpu_avg > 60:
+            recommendations.append({
+                "title": "Elevated CPU Usage",
+                "description": f"CPU usage is at {cpu_avg:.1f}%. Monitor for sustained high usage and review top CPU consumers: {context.get('top_cpu_processes', 'N/A')}",
+                "priority": "medium"
+            })
+        
+        # Memory-based recommendations
+        if memory_pct > 85:
+            recommendations.append({
+                "title": "Critical Memory Pressure",
+                "description": f"Memory usage is at {memory_pct:.1f}%. Risk of OOM. Consider: 1) Identifying memory leaks, 2) Increasing RAM, 3) Adding swap space temporarily.",
+                "priority": "high"
+            })
+        elif memory_pct > 70:
+            recommendations.append({
+                "title": "High Memory Usage",
+                "description": f"Memory usage is at {memory_pct:.1f}%. Top consumers: {context.get('top_memory_processes', 'N/A')}. Consider optimization or capacity planning.",
+                "priority": "medium"
+            })
+        
+        # Disk-based recommendations
+        if disk_latency > 50:
+            recommendations.append({
+                "title": "Slow Disk I/O Detected",
+                "description": f"Disk latency is {disk_latency:.1f}ms (ideal: <10ms). Consider: 1) Checking disk health, 2) Adding SSDs, 3) Optimizing I/O-heavy processes.",
+                "priority": "high"
+            })
+        elif disk_latency > 20:
+            recommendations.append({
+                "title": "Elevated Disk Latency",
+                "description": f"Disk latency is {disk_latency:.1f}ms. Monitor for degradation. Top I/O: {context.get('top_disk_io_processes', 'N/A')}",
+                "priority": "medium"
+            })
+        
+        # Network-based recommendations
+        if packet_drops > 100:
+            recommendations.append({
+                "title": "Network Packet Drops",
+                "description": f"Detected {packet_drops} packet drops. Check: 1) Network interface errors, 2) Ring buffer sizes, 3) Driver/firmware updates.",
+                "priority": "high" if packet_drops > 1000 else "medium"
+            })
+        
+        # If no issues found, add positive recommendation
+        if not recommendations:
+            recommendations.append({
+                "title": "System Health Normal",
+                "description": f"All metrics within normal ranges. CPU: {cpu_avg:.1f}%, Memory: {memory_pct:.1f}%, Disk latency: {disk_latency:.1f}ms.",
+                "priority": "low"
+            })
+        
+        return recommendations
+    
+    def _generate_fallback_alerts(self, context: Dict) -> List[str]:
+        """Generate critical alerts based on metrics thresholds"""
+        alerts = []
+        
+        cpu_avg = context.get('cpu_avg', 0)
+        memory_pct = context.get('memory_percent', 0)
+        packet_drops = context.get('packet_drops', 0)
+        
+        if cpu_avg > 90:
+            alerts.append(f"CRITICAL: CPU at {cpu_avg:.1f}% - immediate action required")
+        if memory_pct > 95:
+            alerts.append(f"CRITICAL: Memory at {memory_pct:.1f}% - OOM risk")
+        if packet_drops > 10000:
+            alerts.append(f"CRITICAL: {packet_drops} packet drops detected")
+        
+        return alerts
+    
+    def _generate_fallback_forecast(self, context: Dict) -> Dict:
+        """Generate basic capacity forecast based on current metrics"""
+        cpu_avg = context.get('cpu_avg', 0)
+        memory_pct = context.get('memory_percent', 0)
+        
+        # Simple linear projection
+        cpu_weeks = max(1, int((80 - cpu_avg) / 2)) if cpu_avg < 80 else 0
+        mem_weeks = max(1, int((80 - memory_pct) / 2)) if memory_pct < 80 else 0
+        
+        needs_upgrade = cpu_avg > 70 or memory_pct > 75
+        
+        return {
+            "cpu_weeks_until_80_percent": cpu_weeks,
+            "memory_weeks_until_80_percent": mem_weeks,
+            "needs_upgrade": needs_upgrade,
+            "recommended_action": "upgrade" if needs_upgrade else "monitor"
+        }
     
     def calculate_forecast(self, current: Dict, baseline: Dict) -> Dict:
         """Calculate capacity forecast"""
