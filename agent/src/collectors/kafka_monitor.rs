@@ -238,6 +238,7 @@ impl KafkaMonitor {
     /// List all consumer groups
     fn list_consumer_groups(&self, container_id: &str) -> Vec<String> {
         // Try different paths for kafka-consumer-groups.sh
+        // First check if the script exists to avoid spamming docker daemon with errors
         let scripts = vec![
             "/opt/kafka/bin/kafka-consumer-groups.sh",
             "/opt/bitnami/kafka/bin/kafka-consumer-groups.sh",
@@ -246,6 +247,20 @@ impl KafkaMonitor {
         ];
 
         for script in scripts {
+            // First check if script exists to avoid error spam
+            let check = Command::new(&self.docker_path)
+                .args(&["exec", container_id, "test", "-x", script])
+                .output();
+            
+            if let Ok(check_output) = check {
+                if !check_output.status.success() {
+                    continue; // Script doesn't exist, try next
+                }
+            } else {
+                continue;
+            }
+
+            // Script exists, now run it
             let output = Command::new(&self.docker_path)
                 .args(&[
                     "exec", container_id, script,
@@ -279,6 +294,20 @@ impl KafkaMonitor {
         ];
 
         for script in scripts {
+            // First check if script exists to avoid error spam
+            let check = Command::new(&self.docker_path)
+                .args(&["exec", container_id, "test", "-x", script])
+                .output();
+            
+            if let Ok(check_output) = check {
+                if !check_output.status.success() {
+                    continue; // Script doesn't exist, try next
+                }
+            } else {
+                continue;
+            }
+
+            // Script exists, now run it
             let output = Command::new(&self.docker_path)
                 .args(&[
                     "exec", container_id, script,
@@ -341,6 +370,20 @@ impl KafkaMonitor {
         ];
 
         for script in scripts {
+            // First check if script exists to avoid error spam
+            let check = Command::new(&self.docker_path)
+                .args(&["exec", container_id, "test", "-x", script])
+                .output();
+            
+            if let Ok(check_output) = check {
+                if !check_output.status.success() {
+                    continue; // Script doesn't exist, try next
+                }
+            } else {
+                continue;
+            }
+
+            // Script exists, now run it
             let output = Command::new(&self.docker_path)
                 .args(&[
                     "exec", container_id, script,

@@ -304,6 +304,7 @@ export function NetworkMetricsPanel({ selectedNode, compact = false }: MetricsPa
     );
   }
 
+
   const { bandwidth = [], connections, top_flows = [] } = networkStats || {};
   const samples = historyData?.samples || [];
   const context = contextData;
@@ -320,7 +321,78 @@ export function NetworkMetricsPanel({ selectedNode, compact = false }: MetricsPa
     closeRate: s.close_rate,
   }));
 
-  const criticalAnomalies = anomalies.filter((a: AnomalyEvent) => a.severity === "critical");
+  // Generate alerts from metrics (Client-side validation to match dashboard)
+  const computedAnomalies: AnomalyEvent[] = [];
+  
+  if (networkStats?.connections) {
+    if (networkStats.connections.total_retransmits > 50) {
+      computedAnomalies.push({
+        timestamp: new Date().toISOString(),
+        event_type: "retransmits_high",
+        severity: "critical", // User requested to see this as critical if it's high
+        process: null,
+        description: `High retransmits detected: ${networkStats.connections.total_retransmits.toLocaleString()}`,
+        value: networkStats.connections.total_retransmits,
+        threshold: 50
+      });
+    }
+    if (networkStats.connections.packet_drops > 100) {
+      computedAnomalies.push({
+        timestamp: new Date().toISOString(),
+        event_type: "packet_drops_high",
+        severity: "critical",
+        process: null,
+        description: `High packet drops detected: ${networkStats.connections.packet_drops.toLocaleString()}`,
+        value: networkStats.connections.packet_drops,
+        threshold: 100
+      });
+    }
+    if (networkStats.connections.active_connections > 50000) {
+      computedAnomalies.push({
+        timestamp: new Date().toISOString(),
+        event_type: "connections_high",
+        severity: "warning",
+        process: null,
+        description: `Unusual spike in active connections: ${networkStats.connections.active_connections.toLocaleString()}`,
+        value: networkStats.connections.active_connections,
+        threshold: 50000
+      });
+    }
+  }
+
+  if (contextData) {
+    if (contextData.socket_backlog_pressure > 20) {
+      const severity = contextData.socket_backlog_pressure > 50 ? "critical" : "warning";
+      computedAnomalies.push({
+        timestamp: new Date().toISOString(),
+        event_type: "socket_pressure",
+        severity: severity,
+        process: null,
+        description: `High socket backlog pressure: ${contextData.socket_backlog_pressure.toFixed(1)}%`,
+        value: contextData.socket_backlog_pressure,
+        threshold: 20
+      });
+    }
+    if (contextData.softirq_net_percent > 30) {
+      computedAnomalies.push({
+        timestamp: new Date().toISOString(),
+        event_type: "softirq_high",
+        severity: "warning",
+        process: null,
+        description: `CPU spending high time in network softirq: ${contextData.softirq_net_percent.toFixed(1)}%`,
+        value: contextData.softirq_net_percent,
+        threshold: 30
+      });
+    }
+  }
+
+  // Merge computed anomalies with backend reported anomalies
+  // Deduplicate by event_type if possible, but for now just showing both is safer
+  const allAnomalies = [...anomalies, ...computedAnomalies];
+
+  const criticalAnomalies = allAnomalies.filter((a: AnomalyEvent) => a.severity === "critical");
+  const warningAnomalies = allAnomalies.filter((a: AnomalyEvent) => a.severity === "warning");
+
 
   return (
     <section className="lg:col-span-3 glass-card rounded-xl p-6 animate-fade-in">

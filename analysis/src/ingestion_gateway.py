@@ -10,8 +10,11 @@ import logging
 from typing import List, Optional
 from datetime import datetime
 import msgpack
+
 from nats.aio.client import Client as NATS
 from nats.js import JetStreamContext
+from nats.errors import TimeoutError as NatsTimeoutError
+
 
 from storage.clickhouse_client import ClickHouseClient
 
@@ -216,8 +219,13 @@ class IngestionGateway:
                                             self.batch_buffer.append(metric)
                                             added_count += 1
                                             self.metrics['ingested_total'] += 1
+
                                             self.metrics['buffer_size'] = len(self.batch_buffer)
-                                            logger.debug(f"  ✓ Added metric: {metric.get('metric_name')} from {hostname}")
+                                            if hostname == 'xcr9':
+                                                logger.info(f"  ✓ Added metric: {metric.get('metric_name')} from {hostname} TS={metric.get('timestamp')}")
+                                            else:
+                                                logger.debug(f"  ✓ Added metric: {metric.get('metric_name')} from {hostname}")
+
                                             
                                             # V2: Broadcast to WebSocket clients immediately for real-time updates
                                             if websocket_broadcast_func:
@@ -270,14 +278,16 @@ class IngestionGateway:
                                 pass
                     
                     # Flush if batch is full
+
                     if len(self.batch_buffer) >= self.batch_size:
                         logger.info(f"📦 Buffer full ({len(self.batch_buffer)} metrics), flushing to ClickHouse...")
                         await self.flush_batch()
                 
-                except TimeoutError:
+                except (TimeoutError, NatsTimeoutError):
                     # No messages available (normal), flush any pending buffer
                     logger.debug("Fetch timeout (no messages), flushing buffer if not empty...")
                     if self.batch_buffer:
+
                         logger.info(f"⏰ Periodic flush of {len(self.batch_buffer)} buffered metrics")
                         await self.flush_batch()
                     continue
@@ -359,6 +369,10 @@ class IngestionGateway:
                             float(metric.get('cpu_system_percent', 0)),
                             float(metric.get('softirq_net_percent', 0)),
                             float(metric.get('socket_queue_pressure', 0)),
+                            float(metric.get('disk_reads', 0)),
+                            float(metric.get('disk_writes', 0)),
+                            float(metric.get('disk_latency', 0)),
+                            float(metric.get('disk_usage', 0)),
                             int(1 if metric.get('oom_risk') else 0)
                         )
                         network_metrics_rows.append(row)
@@ -402,8 +416,8 @@ class IngestionGateway:
                 await self.clickhouse.insert('metrics', generic_metrics_rows)
                 
             if network_metrics_rows:
-                logger.info(f"Skipping {len(network_metrics_rows)} rows to 'network_metrics_ts' table due to schema mismatch...")
-                # await self.clickhouse.insert('network_metrics_ts', network_metrics_rows)
+                logger.info(f"Inserting {len(network_metrics_rows)} rows to 'network_metrics_ts' table...")
+                await self.clickhouse.insert('network_metrics_ts', network_metrics_rows)
                 
             if anomaly_rows:
                 logger.info(f"Inserting {len(anomaly_rows)} rows to 'network_anomalies' table...")

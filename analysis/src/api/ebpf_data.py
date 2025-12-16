@@ -12,6 +12,15 @@ import os
 import re
 import socket
 import logging
+import math
+
+def sanitize_float(val):
+    """Sanitize float values to ensure valid JSON output (no NaN/Inf)."""
+    try:
+        f = float(val)
+        return 0.0 if math.isnan(f) or math.isinf(f) else f
+    except (ValueError, TypeError):
+        return 0.0
 
 logger = logging.getLogger(__name__)
 
@@ -1175,8 +1184,14 @@ async def get_metrics_from_clickhouse(
                 established,
                 open_rate,
                 close_rate,
-                open_rate,
-                close_rate
+                memory_used_percent,
+                cpu_system_percent,
+                softirq_net_percent,
+                socket_queue_pressure,
+                disk_reads,
+                disk_writes,
+                disk_latency,
+                disk_usage
             FROM network_metrics_ts
             WHERE {where_clause}
               AND timestamp >= now() - INTERVAL {minutes} MINUTE
@@ -1197,11 +1212,23 @@ async def get_metrics_from_clickhouse(
                 active_connections=row[7],
                 established=row[8],
                 open_rate=row[9],
-                close_rate=row[10]
+                close_rate=row[10],
+                cpu_system_percent=row[12],  # Index 12 based on SELECT order
+                softirq=row[13],
+                socket_queue_pressure=row[14],
+                disk_reads=row[15],
+                disk_writes=row[16],
+                disk_latency=row[17],
+                disk_usage=row[18]
             ))
         
+
+        
+        # Post-process to calculate deltas
         if samples:
+            _calculate_deltas(samples)
             return samples
+            
     except Exception as e:
         logger.debug(f"network_metrics_ts query failed: {e}")
     
@@ -1211,11 +1238,13 @@ async def get_metrics_from_clickhouse(
             SELECT 
                 toStartOfInterval(timestamp, INTERVAL 30 SECOND) as ts,
                 argMax(hostname, timestamp) as host,
-                maxIf(value, metric_name = 'network_drops') as drops,
+
                 maxIf(value, metric_name = 'network_bytes_sent') as bytes_sent,
                 maxIf(value, metric_name = 'network_bytes_received') as bytes_recv,
                 maxIf(value, metric_name = 'network_packets_sent') as pkts_sent,
                 maxIf(value, metric_name = 'network_packets_received') as pkts_recv,
+
+
                 maxIf(value, metric_name = 'network_connection_open_rate') as open_rate,
                 maxIf(value, metric_name = 'network_connection_close_rate') as close_rate,
                 maxIf(value, metric_name = 'network_latency_p50') as latency_p50,
@@ -1226,8 +1255,10 @@ async def get_metrics_from_clickhouse(
                 maxIf(value, metric_name = 'network_established') as established,
                 maxIf(value, metric_name = 'network_time_wait') as time_wait,
                 maxIf(value, metric_name = 'network_close_wait') as close_wait,
-                maxIf(value, metric_name = 'network_retransmits') as retransmits,
+                maxIf(value, metric_name = 'network_retransmits') - minIf(value, metric_name = 'network_retransmits') as retransmits,
+                maxIf(value, metric_name = 'network_drops') - minIf(value, metric_name = 'network_drops') as drops,
                 maxIf(value, metric_name = 'softirq_net_percent') as softirq,
+
                 maxIf(value, metric_name = 'cpu_system_percent') as cpu_system,
                 maxIf(value, metric_name = 'socket_queue_pressure') as socket_pressure,
                 maxIf(value, metric_name = 'disk_reads_per_sec') as disk_reads,
@@ -1309,11 +1340,51 @@ async def get_metrics_from_clickhouse(
                 disk_latency=disk_latency,
                 disk_usage=disk_usage
             ))
-        
-        return samples
+
+        # Post-process to calculate deltas
+        if samples:
+            _calculate_deltas(samples)
+            return samples
+            
     except Exception as e:
         logger.warning(f"Failed to get metrics from ClickHouse: {e}")
         return []
+    
+    return []
+
+def _calculate_deltas(samples: List[MetricsSample]):
+    """Calculate deltas for cumulative counters (retransmits, packet_drops)."""
+    if not samples:
+        return
+        
+    # Sort by time ascending
+    samples.sort(key=lambda s: s.epoch)
+    
+    # Start from index 1 and subtract previous
+    for i in range(len(samples) - 1, 0, -1):
+        curr = samples[i]
+        prev = samples[i-1]
+        
+        # Calculate simple difference
+        # Handle reset (if rebooted, curr < prev, so keep raw or 0)
+        if curr.retransmits >= prev.retransmits:
+            curr.retransmits = curr.retransmits - prev.retransmits
+        else:
+            curr.retransmits = 0
+            
+        if curr.packet_drops >= prev.packet_drops:
+            curr.packet_drops = curr.packet_drops - prev.packet_drops
+        else:
+            curr.packet_drops = 0
+    
+    # The first sample (oldest) has no previous to invalid, set to 0
+    samples[0].retransmits = 0
+    samples[0].packet_drops = 0
+    
+    # Restore DESC order (newest first)
+    samples.reverse()
+
+
 
 
 async def get_anomalies_from_clickhouse(
@@ -2140,12 +2211,13 @@ async def get_connection_stats_from_clickhouse(hostname: Optional[str] = None) -
         active_result = await ch.query(query)
         active = int(active_result[0][0]) if active_result and active_result[0][0] else 0
         
+
         query = f"""
-        SELECT sum(latest_value) as total
+        SELECT sum(delta_value) as total
         FROM (
-            SELECT hostname, argMax(value, timestamp) as latest_value
+            SELECT hostname, max(value) - min(value) as delta_value
             FROM metrics
-            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+            WHERE timestamp >= now() - INTERVAL 5 MINUTE
               AND metric_name = 'network_retransmits'
               {hostname_filter}
             GROUP BY hostname
@@ -2155,11 +2227,11 @@ async def get_connection_stats_from_clickhouse(hostname: Optional[str] = None) -
         retransmits = int(retransmits_result[0][0]) if retransmits_result and retransmits_result[0][0] else 0
         
         query = f"""
-        SELECT sum(latest_value) as total
+        SELECT sum(delta_value) as total
         FROM (
-            SELECT hostname, argMax(value, timestamp) as latest_value
+            SELECT hostname, max(value) - min(value) as delta_value
             FROM metrics
-            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+            WHERE timestamp >= now() - INTERVAL 5 MINUTE
               AND metric_name = 'network_drops'
               {hostname_filter}
             GROUP BY hostname
@@ -2167,6 +2239,7 @@ async def get_connection_stats_from_clickhouse(hostname: Optional[str] = None) -
         """
         drops_result = await ch.query(query)
         drops = int(drops_result[0][0]) if drops_result and drops_result[0][0] else 0
+
         
         query = f"""
         SELECT avg(latest_value) as avg_rate
@@ -2286,6 +2359,13 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
     """
     import socket
     current_hostname = socket.gethostname()
+
+    def sanitize_float(val):
+        try:
+            f = float(val)
+            return 0.0 if math.isnan(f) or math.isinf(f) else f
+        except (ValueError, TypeError):
+            return 0.0
     
     # For now, we only have local data. In future, query ClickHouse for specific hosts
     if hostname and hostname != current_hostname:
@@ -2294,13 +2374,16 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
             ch = get_clickhouse_client()
             
             # Fetch latest network metrics from the metrics table (where agent sends data)
+
+            # Fetch latest AND previous network metrics to calculate delta
             query = f"""
             SELECT 
                 metric_name,
-                argMax(value, timestamp) as value
+                argMax(value, timestamp) as current_value,
+                max(value) - min(value) as delta_value
             FROM metrics
             WHERE hostname = '{hostname}'
-              AND timestamp >= now() - INTERVAL 10 MINUTE
+              AND timestamp >= now() - INTERVAL 5 MINUTE
               AND metric_name IN (
                 'network_drops', 'network_bytes_sent', 'network_bytes_received',
                 'network_packets_sent', 'network_packets_received',
@@ -2316,28 +2399,39 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
             
             # Parse results into a dict
             metrics_dict = {}
+            deltas_dict = {}
             if result:
                 for row in result:
-                    metrics_dict[row[0]] = float(row[1]) if row[1] else 0
+                    metric = row[0]
+                    metrics_dict[metric] = float(row[1]) if row[1] else 0
+                    deltas_dict[metric] = float(row[2]) if row[2] else 0
             
             if metrics_dict:
                 # We have data from the agent
-                drops = int(metrics_dict.get('network_drops', 0))
+                # Use DELTAS for counters so UI shows rate of change, not lifetime totals
+                drops = int(deltas_dict.get('network_drops', 0))
+                retransmits = int(deltas_dict.get('network_retransmits', 0))
+                
                 bytes_sent = int(metrics_dict.get('network_bytes_sent', 0))
                 bytes_recv = int(metrics_dict.get('network_bytes_received', 0))
                 pkts_sent = int(metrics_dict.get('network_packets_sent', 0))
                 pkts_recv = int(metrics_dict.get('network_packets_received', 0))
                 
                 # New explicit metrics (Debian/Non-eBPF support)
-                open_rate = float(metrics_dict.get('network_connection_open_rate', 0.0))
-                close_rate = float(metrics_dict.get('network_connection_close_rate', 0.0))
-                latency_p50 = float(metrics_dict.get('network_latency_p50', 0.0))
-                latency_p90 = float(metrics_dict.get('network_latency_p90', latency_p50))  # Fallback to p50 if not available
-                latency_p99 = float(metrics_dict.get('network_latency_p99', latency_p90))  # Fallback to p90 if not available
+                # sanitize_float is defined at function scope
+
+                open_rate = sanitize_float(metrics_dict.get('network_connection_open_rate', 0.0))
+                close_rate = sanitize_float(metrics_dict.get('network_connection_close_rate', 0.0))
+                latency_p50 = sanitize_float(metrics_dict.get('network_latency_p50', 0.0))
+                latency_p90 = sanitize_float(metrics_dict.get('network_latency_p90', latency_p50))
+                latency_p99 = sanitize_float(metrics_dict.get('network_latency_p99', latency_p90))
+                
                 active_opens = int(metrics_dict.get('network_active_connections', 0))
                 time_wait = int(metrics_dict.get('network_time_wait', 0))
                 close_wait = int(metrics_dict.get('network_close_wait', 0))
-                retransmits = int(metrics_dict.get('network_retransmits', 0))
+                # Retransmits is handled above via deltas_dict
+                established = int(metrics_dict.get('network_established', 0))
+
                 established = int(metrics_dict.get('network_established', 0))
                 
                 # Estimate active connections if explicit metric missing
@@ -2498,13 +2592,72 @@ async def get_network_stats(hostname: Optional[str] = Query(None)) -> NetworkSta
                 top_flows=[]
             )
     
+    
+    # Define sanitization helper
+    # sanitize_float is now global
+
+
+    # For now, we only have local data. In future, query ClickHouse for specific hosts
+    if hostname and hostname != current_hostname:
+         # ... (existing remote path logic remains, but we reuse sanitize_float if needed, 
+         # effectively replacing the inner definition if we removed it, but for safety I will leave the inner one alone or remove it if I can match it exactly.
+         # Wait, looking at the previous tool call, I inserted sanitize_float at line 2406. 
+         pass
+
+    # ... (I will replace the RETURN block at the end of function)
+
+    # Fetch local stats
+    raw_bandwidth = get_bandwidth_by_process()
+    raw_latency = get_network_latency_stats()
+    raw_connections = await get_connection_stats_from_clickhouse()
+    top_flows = get_flow_edges()
+
+    # CONSTANTLY SANITIZE: Defensive reconstruction of all objects
+    
+    # 1. Sanitize Bandwidth List
+    safe_bandwidth = []
+    for b in raw_bandwidth:
+        safe_bandwidth.append(ProcessBandwidth(
+            process_name=b.process_name,
+            pid=b.pid,
+            bytes_sent=b.bytes_sent,
+            bytes_received=b.bytes_received,
+            total_bytes=b.total_bytes,
+            bytes_per_sec=sanitize_float(b.bytes_per_sec),
+            flows=b.flows,
+            hostname=b.hostname
+        ))
+
+    # 2. Sanitize Latency Stats
+    safe_latency = LatencyStats(
+        p50=sanitize_float(raw_latency.p50),
+        p90=sanitize_float(raw_latency.p90),
+        p99=sanitize_float(raw_latency.p99),
+        min_ms=sanitize_float(raw_latency.min_ms),
+        max_ms=sanitize_float(raw_latency.max_ms),
+        samples=raw_latency.samples
+    )
+    
+    # 3. Sanitize Connection Stats
+    safe_connections = ConnectionStats(
+        active_connections=raw_connections.active_connections,
+        established=raw_connections.established,
+        listen=raw_connections.listen,
+        time_wait=raw_connections.time_wait,
+        close_wait=raw_connections.close_wait,
+        total_retransmits=raw_connections.total_retransmits,
+        packet_drops=raw_connections.packet_drops,
+        open_rate_per_sec=sanitize_float(raw_connections.open_rate_per_sec),
+        close_rate_per_sec=sanitize_float(raw_connections.close_rate_per_sec)
+    )
+    
     return NetworkStatsResponse(
         hostname=current_hostname if hostname else None,
         timestamp=datetime.utcnow().isoformat(),
-        bandwidth=get_bandwidth_by_process(),
-        latency=get_network_latency_stats(),
-        connections=await get_connection_stats_from_clickhouse(),
-        top_flows=get_flow_edges()
+        bandwidth=safe_bandwidth,
+        latency=safe_latency,
+        connections=safe_connections,
+        top_flows=top_flows
     )
 
 
@@ -2785,7 +2938,9 @@ async def get_network_trends(
                     data[name] = (curr, base)
             
             def make_trend(name, metric_key):
-                curr, base = data.get(metric_key, (0.0, 0.0))
+                curr_raw, base_raw = data.get(metric_key, (0.0, 0.0))
+                curr = sanitize_float(curr_raw)
+                base = sanitize_float(base_raw)
                 
                 # Special handling for counter metrics (retransmits, drops) - sum instead of avg might be better 
                 # but API expects rate/avg over window usually. Let's stick to avg specific to window for now.
@@ -2794,6 +2949,8 @@ async def get_network_trends(
                     delta = 0 if curr == 0 else 100
                 else:
                     delta = ((curr - base) / base) * 100
+                
+                delta = sanitize_float(delta)
                     
                 severity = 'normal'
                 if abs(delta) > 50: severity = 'critical'

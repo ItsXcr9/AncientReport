@@ -1,8 +1,9 @@
 
-import { Activity, Brain, CheckCircle, Database, Cpu, HardDrive, TrendingUp, Loader2, Clock, Server, AlertTriangle, AlertCircle, Zap } from 'lucide-react';
+import { Activity, Brain, CheckCircle, Database, Cpu, HardDrive, TrendingUp, Loader2, Clock, Server, AlertTriangle, AlertCircle, Zap, RefreshCw } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ServerInfoCard } from '../components/ServerInfoCard';
 import { useOutletContext } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 
 // Type definitions for props we expect to receive from the main App layout wrapper
 interface DashboardProps {
@@ -15,6 +16,17 @@ interface DashboardProps {
   serverInfo: any;
   triggerAnalysis: () => void;
   formatCooldownTime: (ms: number) => string;
+}
+
+interface LiveAlert {
+  id: string;
+  severity: string;
+  message: string;
+  hostname: string;
+  metric: string;
+  value: number;
+  threshold: number;
+  triggered_at: string;
 }
 
 export default function DashboardHome() {
@@ -30,8 +42,93 @@ export default function DashboardHome() {
     formatCooldownTime 
   } = useOutletContext<DashboardProps>();
 
+  const [liveAlerts, setLiveAlerts] = useState<LiveAlert[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [lastChecked, setLastChecked] = useState<string>('');
+
+  // Fetch live alerts every 30 seconds
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        setAlertsLoading(true);
+        const response = await fetch('/api/alerts/live');
+        const data = await response.json();
+        setLiveAlerts(data.alerts || []);
+        setLastChecked(new Date().toLocaleTimeString());
+      } catch (error) {
+        console.error('Failed to fetch live alerts:', error);
+      } finally {
+        setAlertsLoading(false);
+      }
+    };
+
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const criticalAlerts = liveAlerts.filter(a => a.severity === 'critical');
+  const warningAlerts = liveAlerts.filter(a => a.severity === 'warning');
+
   return (
     <div className="space-y-6">
+      {/* LIVE ALERTS BANNER - Always at TOP */}
+      {liveAlerts.length > 0 ? (
+        <div className={`p-4 rounded-lg border shadow-lg ${
+          criticalAlerts.length > 0 
+            ? 'bg-red-500/15 border-red-500/40 shadow-red-500/10' 
+            : 'bg-yellow-500/15 border-yellow-500/40 shadow-yellow-500/10'
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className={`font-semibold text-lg flex items-center gap-2 ${
+              criticalAlerts.length > 0 ? 'text-red-400' : 'text-yellow-400'
+            }`}>
+              <AlertTriangle className="w-5 h-5" />
+              {criticalAlerts.length > 0 
+                ? `🚨 ${criticalAlerts.length} Critical Alert${criticalAlerts.length > 1 ? 's' : ''}`
+                : `⚠️ ${warningAlerts.length} Warning${warningAlerts.length > 1 ? 's' : ''}`
+              }
+              {warningAlerts.length > 0 && criticalAlerts.length > 0 && (
+                <span className="text-yellow-400 text-sm ml-2">+ {warningAlerts.length} warnings</span>
+              )}
+            </h4>
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              {alertsLoading && <RefreshCw className="w-3 h-3 animate-spin" />}
+              <span>Updated: {lastChecked}</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {criticalAlerts.map((alert, i) => (
+              <div key={alert.id || i} className="flex items-start gap-2 text-sm">
+                <span className="text-red-400 font-bold">●</span>
+                <span className="text-gray-200">{alert.message}</span>
+                <span className="text-gray-500 text-xs">({alert.hostname})</span>
+              </div>
+            ))}
+            {warningAlerts.slice(0, 5).map((alert, i) => (
+              <div key={alert.id || i} className="flex items-start gap-2 text-sm">
+                <span className="text-yellow-400 font-bold">●</span>
+                <span className="text-gray-300">{alert.message}</span>
+                <span className="text-gray-500 text-xs">({alert.hostname})</span>
+              </div>
+            ))}
+            {warningAlerts.length > 5 && (
+              <div className="text-xs text-gray-500 mt-1">
+                ...and {warningAlerts.length - 5} more warnings
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/30 text-green-400 flex items-center gap-3">
+          <CheckCircle className="w-5 h-5" />
+          <div>
+            <span className="font-medium">All Systems Healthy</span>
+            <span className="text-gray-400 text-sm ml-2">• Last checked: {lastChecked || 'checking...'}</span>
+          </div>
+        </div>
+      )}
+
       {/* Header Section */}
       <div className="flex items-center justify-between">
         <div>
@@ -39,7 +136,7 @@ export default function DashboardHome() {
           <p className="text-gray-400 text-sm">Real-time performance and health metrics</p>
         </div>
         
-        {/* Trigger Analysis Button (Moved here for better context) */}
+        {/* Trigger Analysis Button */}
         <button
             onClick={triggerAnalysis}
             disabled={cooldownRemaining > 0 || isTriggering}
@@ -64,21 +161,6 @@ export default function DashboardHome() {
             )}
         </button>
       </div>
-
-      {/* Critical Alerts Banner - Shown at Top for Visibility */}
-      {report && report.ai_insights?.critical_alerts && report.ai_insights.critical_alerts.length > 0 && (
-        <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/30 shadow-lg shadow-red-500/5">
-          <h4 className="font-medium text-red-400 mb-2 flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5" />
-            {selectedServer ? `Critical Alerts on ${selectedServer}` : 'Critical Alerts Across Fleet'}
-          </h4>
-          <ul className="text-sm text-gray-300 space-y-1">
-            {report.ai_insights.critical_alerts.map((alert: any, i: number) => (
-              <li key={i}>• {String(alert)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
        {/* Server Info Cards */}
        {selectedServer ? (

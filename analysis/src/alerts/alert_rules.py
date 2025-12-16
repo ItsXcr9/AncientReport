@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from ..storage.clickhouse_client import get_clickhouse_client
 from ..api.realtime import broadcast_alert
 from .telegram_notifier import send_telegram_alert
+from .remediation_actions import execute_alert_remediation
 from utils.timezone import now
 
 logger = logging.getLogger(__name__)
@@ -62,12 +63,71 @@ class AlertRule:
 
 # Define default alert rules
 DEFAULT_RULES = [
+    # CPU Alerts
     AlertRule('Critical CPU', 'cpu_usage_percent', '>', 90, level='critical', cooldown_minutes=15),
     AlertRule('High CPU', 'cpu_usage_percent', '>', 80, level='warning', cooldown_minutes=30),
-    AlertRule('Critical Memory', 'memory_usage_percent', '>', 90, level='critical', cooldown_minutes=15),
+    
+    # Memory Alerts
+    AlertRule('Critical Memory', 'memory_usage_percent', '>', 95, level='critical', cooldown_minutes=15),
     AlertRule('High Memory', 'memory_usage_percent', '>', 85, level='warning', cooldown_minutes=30),
+    
+    # Disk Space Alerts
+    AlertRule('Critical Disk Usage', 'disk_usage_percent', '>', 95, level='critical', cooldown_minutes=30),
     AlertRule('High Disk Usage', 'disk_usage_percent', '>', 90, level='warning', cooldown_minutes=60),
-    AlertRule('Network Packet Loss', 'network_packets_dropped', '>', 100, level='warning', cooldown_minutes=20),
+    
+    # Disk I/O Alerts
+    AlertRule('High Disk Latency', 'disk_latency_ms', '>', 100, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Disk Latency', 'disk_latency_ms', '>', 500, level='critical', cooldown_minutes=10),
+    
+    # Network Alerts - Packet Loss & Retransmits
+    AlertRule('Network Packet Loss', 'network_drops', '>', 1000, level='warning', cooldown_minutes=20),
+    AlertRule('Critical Network Drops', 'network_drops', '>', 10000, level='critical', cooldown_minutes=10),
+    AlertRule('High Network Retransmits', 'network_retransmits', '>', 10000, level='warning', cooldown_minutes=20),
+    AlertRule('Critical Network Retransmits', 'network_retransmits', '>', 50000, level='critical', cooldown_minutes=10),
+    
+    # Network Alerts - Latency
+    AlertRule('High Latency P50', 'network_latency_p50', '>', 50, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Latency P50', 'network_latency_p50', '>', 200, level='critical', cooldown_minutes=10),
+    AlertRule('High Latency P90', 'network_latency_p90', '>', 100, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Latency P90', 'network_latency_p90', '>', 500, level='critical', cooldown_minutes=10),
+    AlertRule('High Latency P99', 'network_latency_p99', '>', 200, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Latency P99', 'network_latency_p99', '>', 1000, level='critical', cooldown_minutes=10),
+    
+    # Network Alerts - Connection States
+    AlertRule('High Active Connections', 'network_active_connections', '>', 5000, level='warning', cooldown_minutes=30),
+    AlertRule('Critical Active Connections', 'network_active_connections', '>', 10000, level='critical', cooldown_minutes=15),
+    AlertRule('High Established Connections', 'network_established', '>', 3000, level='warning', cooldown_minutes=30),
+    AlertRule('High Time Wait', 'network_time_wait', '>', 1000, level='warning', cooldown_minutes=30),
+    AlertRule('Critical Time Wait', 'network_time_wait', '>', 5000, level='critical', cooldown_minutes=15),
+    AlertRule('High Close Wait', 'network_close_wait', '>', 100, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Close Wait', 'network_close_wait', '>', 500, level='critical', cooldown_minutes=10),
+    
+    # Network Alerts - Connection Rates
+    AlertRule('High Connection Open Rate', 'network_connection_open_rate', '>', 500, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Connection Open Rate', 'network_connection_open_rate', '>', 2000, level='critical', cooldown_minutes=10),
+    AlertRule('High Connection Close Rate', 'network_connection_close_rate', '>', 500, level='warning', cooldown_minutes=15),
+    
+    # Network Alerts - Bandwidth (bytes per second)
+    AlertRule('High Bytes Sent', 'network_bytes_sent', '>', 100000000, level='warning', cooldown_minutes=30),  # 100 MB/s
+    AlertRule('High Bytes Received', 'network_bytes_received', '>', 100000000, level='warning', cooldown_minutes=30),  # 100 MB/s
+    AlertRule('High Packets Sent', 'network_packets_sent', '>', 100000, level='warning', cooldown_minutes=30),
+    AlertRule('High Packets Received', 'network_packets_received', '>', 100000, level='warning', cooldown_minutes=30),
+    
+    # Open Files Alerts
+    AlertRule('High Open Files', 'open_files_percent', '>', 80, level='warning', cooldown_minutes=30),
+    AlertRule('Critical Open Files', 'open_files_percent', '>', 95, level='critical', cooldown_minutes=15),
+    
+    # Inode Alerts (using absolute thresholds since we don't have max inodes easily)
+    # Typically inode exhaustion is rare but critical when it happens
+    AlertRule('High Inode Usage', 'inodes_used', '>', 5000000, level='warning', cooldown_minutes=60),
+    AlertRule('Critical Inode Usage', 'inodes_used', '>', 10000000, level='critical', cooldown_minutes=30),
+    
+    # Load Average Alerts
+    AlertRule('High Load Average', 'load_avg_1min', '>', 10, level='warning', cooldown_minutes=15),
+    AlertRule('Critical Load Average', 'load_avg_1min', '>', 20, level='critical', cooldown_minutes=10),
+    
+    # Socket/Network Pressure
+    AlertRule('Socket Queue Pressure', 'socket_queue_pressure', '>', 0, level='warning', cooldown_minutes=15),
 ]
 
 
@@ -121,6 +181,12 @@ class AlertManager:
             
             # Send to Telegram
             await send_telegram_alert(alert)
+            
+            # Execute auto-remediation if enabled
+            try:
+                await execute_alert_remediation(rule.name, server, value)
+            except Exception as e:
+                logger.error(f"Remediation failed for {rule.name}: {e}")
     
     async def check_recent_metrics(self, minutes: int = 5):
         """

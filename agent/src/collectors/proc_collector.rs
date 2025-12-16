@@ -187,6 +187,104 @@ impl ProcCollector {
             tags.clone(),
         )).await?;
 
+        // Collect open file descriptors (system-wide)
+        // Read /proc/sys/fs/file-nr: allocated  free  max
+        let file_nr_content = match fs::read_to_string("/proc/sys/fs/file-nr").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/host/proc/sys/fs/file-nr").await.unwrap_or_default(),
+        };
+        
+        if !file_nr_content.is_empty() {
+            let parts: Vec<&str> = file_nr_content.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let allocated: u64 = parts[0].parse().unwrap_or(0);
+                let free: u64 = parts[1].parse().unwrap_or(0);
+                let max: u64 = parts[2].parse().unwrap_or(1);
+                
+                let open_files = allocated.saturating_sub(free);
+                let open_files_percent = if max > 0 {
+                    (open_files as f64 / max as f64) * 100.0
+                } else {
+                    0.0
+                };
+                
+                info!("Open files: {} / {} ({:.2}%)", open_files, max, open_files_percent);
+                
+                self.metrics_tx.send(Metric::new_basic(
+                    timestamp,
+                    self.hostname.clone(),
+                    "system".to_string(),
+                    "open_files".to_string(),
+                    open_files as f64,
+                    tags.clone(),
+                )).await?;
+                
+                self.metrics_tx.send(Metric::new_basic(
+                    timestamp,
+                    self.hostname.clone(),
+                    "system".to_string(),
+                    "max_files".to_string(),
+                    max as f64,
+                    tags.clone(),
+                )).await?;
+                
+                self.metrics_tx.send(Metric::new_basic(
+                    timestamp,
+                    self.hostname.clone(),
+                    "system".to_string(),
+                    "open_files_percent".to_string(),
+                    open_files_percent,
+                    tags.clone(),
+                )).await?;
+            }
+        }
+
+        // Collect inode usage (system-wide)
+        // Read /proc/sys/fs/inode-nr: allocated  free
+        let inode_nr_content = match fs::read_to_string("/proc/sys/fs/inode-nr").await {
+            Ok(content) => content,
+            Err(_) => fs::read_to_string("/host/proc/sys/fs/inode-nr").await.unwrap_or_default(),
+        };
+        
+        if !inode_nr_content.is_empty() {
+            let parts: Vec<&str> = inode_nr_content.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let allocated: u64 = parts[0].parse().unwrap_or(0);
+                let free: u64 = parts[1].parse().unwrap_or(0);
+                
+                let used_inodes = allocated.saturating_sub(free);
+                
+                info!("Inodes: {} used, {} free, {} allocated", used_inodes, free, allocated);
+                
+                self.metrics_tx.send(Metric::new_basic(
+                    timestamp,
+                    self.hostname.clone(),
+                    "system".to_string(),
+                    "inodes_used".to_string(),
+                    used_inodes as f64,
+                    tags.clone(),
+                )).await?;
+                
+                self.metrics_tx.send(Metric::new_basic(
+                    timestamp,
+                    self.hostname.clone(),
+                    "system".to_string(),
+                    "inodes_free".to_string(),
+                    free as f64,
+                    tags.clone(),
+                )).await?;
+                
+                self.metrics_tx.send(Metric::new_basic(
+                    timestamp,
+                    self.hostname.clone(),
+                    "system".to_string(),
+                    "inodes_allocated".to_string(),
+                    allocated as f64,
+                    tags.clone(),
+                )).await?;
+            }
+        }
+
         // Collect disk space metrics
         let disks = Disks::new_with_refreshed_list();
         

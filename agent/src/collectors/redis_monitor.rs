@@ -168,7 +168,20 @@ impl RedisMonitor {
 
     /// Execute redis-cli INFO command
     fn execute_redis_info(&self, container_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Try without password first
+        // First check if redis-cli exists to avoid error spam
+        let check = Command::new(&self.docker_path)
+            .args(&["exec", container_id, "which", "redis-cli"])
+            .output();
+        
+        if let Ok(check_output) = check {
+            if !check_output.status.success() {
+                return Err("redis-cli not found in container".into());
+            }
+        } else {
+            return Err("Failed to check for redis-cli".into());
+        }
+
+        // redis-cli exists, try without password first
         let output = Command::new(&self.docker_path)
             .args(&["exec", container_id, "redis-cli", "INFO", "ALL"])
             .output()?;

@@ -107,6 +107,10 @@ app.include_router(rate_query_api.router, tags=["V9 Rate Queries"])
 from api import internal_metrics as internal_metrics_api
 app.include_router(internal_metrics_api.router, tags=["V10 Internal Metrics"])
 
+# Register V11 Live Alerts API (real-time alerts for dashboard)
+from api import live_alerts as live_alerts_api
+app.include_router(live_alerts_api.router, tags=["V11 Live Alerts"])
+
 # Import and register metrics API (History Charts)
 # NOTE: The metrics_api router is NOT registered here because main.py already defines
 # /api/metrics/* endpoints inline (lines 828-1055) with correct metric names and response format.
@@ -428,6 +432,34 @@ async def startup_event():
         replace_existing=True
     )
     logger.info("✓ Scheduled HTTP client refresh (every 6 hours)")
+    
+    # Schedule comprehensive system health check (every minute)
+    async def comprehensive_health_check_job():
+        """Check all system health: containers, CPU, memory, disk, latency, agents"""
+        try:
+            from monitors.system_health import run_comprehensive_health_check
+            from monitors.alert_manager import trigger_alerts_batch
+            
+            alerts = await run_comprehensive_health_check(clickhouse_client)
+            if alerts:
+                # Store alerts in DB and send to Telegram
+                triggered = await trigger_alerts_batch(clickhouse_client, alerts)
+                if triggered > 0:
+                    logger.warning(f"🔔 Health check triggered {triggered} alerts")
+        except ImportError as e:
+            logger.debug(f"Health monitoring not available: {e}")
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+    
+    scheduler.add_job(
+        comprehensive_health_check_job,
+        'interval',
+        minutes=1,
+        id='comprehensive_health_check',
+        name='Comprehensive Health Check',
+        replace_existing=True
+    )
+    logger.info("✓ Scheduled comprehensive health check (every minute)")
     
     scheduler.start()
     logger.info("✓ Scheduler started")
