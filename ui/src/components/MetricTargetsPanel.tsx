@@ -6,11 +6,13 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { 
   Plus, Trash2, Edit2, RefreshCw, Check, X, 
   Activity, AlertCircle, Clock, Link2, Play,
-  Server, Gauge
+  Server, Gauge, Radar, ExternalLink, Zap
 } from 'lucide-react';
+
 
 interface Target {
   id: string;
@@ -34,8 +36,19 @@ interface TestResult {
   error?: string;
 }
 
+interface DiscoveredExporter {
+  hostname: string;
+  exporter_type: string;
+  scrape_target: string;
+  metric_count: number;
+  last_seen: string;
+  first_seen: string;
+  status: 'up' | 'down';
+}
+
 export function MetricTargetsPanel() {
   const [targets, setTargets] = useState<Target[]>([]);
+  const [discoveredExporters, setDiscoveredExporters] = useState<DiscoveredExporter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTarget, setEditingTarget] = useState<Target | null>(null);
@@ -51,7 +64,11 @@ export function MetricTargetsPanel() {
 
   useEffect(() => {
     fetchTargets();
-    const interval = setInterval(fetchTargets, 30000); // Refresh every 30s
+    fetchDiscoveredExporters();
+    const interval = setInterval(() => {
+      fetchTargets();
+      fetchDiscoveredExporters();
+    }, 30000); // Refresh every 30s
     return () => clearInterval(interval);
   }, []);
 
@@ -66,6 +83,21 @@ export function MetricTargetsPanel() {
       console.error('Failed to fetch targets:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchDiscoveredExporters = async () => {
+    try {
+      const response = await fetch('/api/prometheus/discovered/exporters');
+      console.log('[DEBUG] fetchDiscoveredExporters response status:', response.status);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[DEBUG] fetchDiscoveredExporters data:', data);
+        console.log('[DEBUG] exporters array:', data.exporters);
+        setDiscoveredExporters(data.exporters || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch discovered exporters:', error);
     }
   };
 
@@ -358,6 +390,75 @@ export function MetricTargetsPanel() {
               </div>
             </motion.div>
           ))}
+        </div>
+      )}
+
+      {/* Agent-Discovered Exporters Section */}
+      {discoveredExporters.length > 0 && (
+        <div className="mt-8 pt-6 border-t border-white/10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Radar className="w-5 h-5 text-green-400" />
+              <h3 className="text-md font-semibold text-green-400">Auto-Discovered Exporters</h3>
+              <span className="text-xs text-gray-400 bg-green-500/10 px-2 py-1 rounded-full border border-green-500/30">
+                {discoveredExporters.length} found
+              </span>
+            </div>
+            <Link 
+              to="/prometheus-discovery"
+              className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              View Details
+            </Link>
+          </div>
+          
+          <p className="text-xs text-gray-500 mb-4">
+            These exporters were automatically discovered by agents running on your servers.
+          </p>
+
+          <div className="space-y-2">
+            {discoveredExporters.map((exporter, idx) => (
+              <div
+                key={`${exporter.hostname}-${exporter.scrape_target}-${idx}`}
+                className={`p-3 rounded-lg border transition-colors ${
+                  exporter.status === 'up' 
+                    ? 'bg-green-500/5 border-green-500/20' 
+                    : 'bg-red-500/5 border-red-500/20'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      exporter.status === 'up' 
+                        ? 'bg-green-400 shadow-lg shadow-green-500/50' 
+                        : 'bg-red-400'
+                    }`} />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-white text-sm">{exporter.hostname}</span>
+                        {exporter.exporter_type && (
+                          <span className="text-xs bg-white/5 text-gray-400 px-2 py-0.5 rounded">
+                            {exporter.exporter_type}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-400 mt-1">
+                        <span className="font-mono">{exporter.scrape_target}</span>
+                        <span className="flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          {exporter.metric_count} metrics
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Last seen: {formatLastScrape(exporter.last_seen)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

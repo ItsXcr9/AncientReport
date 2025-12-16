@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::streaming::Metric;
+use crate::aggregator::Metric;
 
 /// Common Prometheus exporter ports to scan
 const COMMON_EXPORTER_PORTS: &[(u16, &str)] = &[

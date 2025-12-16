@@ -47,7 +47,8 @@ services:
         tag: "{{.Name}}"
 
   agent:
-    image: ghcr.io/itsxcr9/ancientreport/agent:latest
+    build: ./agent
+    # image: ghcr.io/itsxcr9/ancientreport/agent:latest  # Commented out to build with prometheus_scraper
     container_name: AncientReport-agent
     network_mode: host
     pid: "host" # Required to see host processes, not container processes
@@ -63,6 +64,9 @@ services:
       CLICKHOUSE_USER: AncientReport
       CLICKHOUSE_PASSWORD: AncientReport
       NATS_ENABLED: ${NATS_ENABLED:-true}
+      # V4 Prometheus Scraper - Auto-discover and scrape local exporters
+      PROMETHEUS_ENABLED: "true"
+      PROMETHEUS_AUTO_DISCOVER: "true"
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /sys/fs/bpf:/sys/fs/bpf:ro
@@ -128,7 +132,8 @@ services:
 
   # React frontend (optional)
   ui:
-    image: ghcr.io/itsxcr9/ancientreport/ui:latest
+    build: ./ui
+    # image: ghcr.io/itsxcr9/ancientreport/ui:latest  # Commented out to build with PrometheusDiscovery
     container_name: AncientReport-ui
     ports:
       - "6080:3000"

@@ -1029,7 +1029,7 @@ async def list_discovered_exporters(
         query = f"""
             SELECT 
                 hostname,
-                category,
+                tags['category'] as category,
                 tags['scrape_target'] as scrape_target,
                 count(DISTINCT metric_name) as metric_count,
                 max(timestamp) as last_seen,
@@ -1084,7 +1084,7 @@ async def list_discovered_metrics(
         if hostname:
             conditions.append(f"hostname = '{hostname}'")
         if category:
-            conditions.append(f"category = '{category}'")
+            conditions.append(f"tags['category'] = '{category}'")
         if search:
             conditions.append(f"metric_name LIKE '%{search}%'")
         
@@ -1093,7 +1093,7 @@ async def list_discovered_metrics(
         query = f"""
             SELECT 
                 hostname,
-                category,
+                tags['category'] as category,
                 metric_name,
                 tags['metric_type'] as metric_type,
                 count() as sample_count,
@@ -1231,7 +1231,7 @@ async def list_discovered_categories(hostname: Optional[str] = None):
         
         query = f"""
             SELECT 
-                category,
+                tags['category'] as category,
                 count(DISTINCT metric_name) as metric_count,
                 count(DISTINCT hostname) as host_count,
                 max(timestamp) as last_seen
