@@ -13,7 +13,8 @@ mod security;
 
 use config::Config;
 use aggregator::MetricAggregator;
-use collectors::{ProcCollector, DockerCollector, EbpfCollector, KafkaMonitor, RedisMonitor, PostgresMonitor, NginxMonitor, MongoMonitor, ClickHouseMonitor};
+use collectors::{ProcCollector, DockerCollector, EbpfCollector, KafkaMonitor, RedisMonitor, PostgresMonitor, NginxMonitor, MongoMonitor, ClickHouseMonitor, PrometheusScraper};
+
 use streaming::StreamingPublisher;
 use custom_monitors::CustomMonitorManager;
 use security::{PortScanner, ContainerScanner};
@@ -197,6 +198,16 @@ async fn main() -> Result<()> {
     });
     
     info!("✓ Additional Monitors started (NGINX, MongoDB, ClickHouse)");
+
+    // V4: Prometheus Scraper (scrapes local Prometheus exporters and forwards via NATS)
+    info!("Starting V4 Prometheus Scraper...");
+    let prom_hostname = config.agent.hostname.clone();
+    let prom_metrics_tx = metrics_tx.clone();
+    let prometheus_handle = tokio::spawn(async move {
+        let scraper = PrometheusScraper::new(prom_hostname, prom_metrics_tx);
+        scraper.run().await;
+    });
+    info!("✓ Prometheus Scraper started (enable with PROMETHEUS_ENABLED=true)");
 
     // V3: Start Custom Monitor Manager
     info!("Starting V3 Custom Monitor Manager...");

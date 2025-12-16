@@ -1006,3 +1006,256 @@ def stop_scraper():
     if _scraper_task and not _scraper_task.done():
         _scraper_task.cancel()
         logger.info("Metrics scraper stopped")
+
+
+# ============================================
+# Agent-Discovered Prometheus Metrics (V4)
+# These come from agent's auto-discovery scraper
+# stored in metrics table with source=prometheus
+# ============================================
+
+@router.get("/discovered/exporters")
+async def list_discovered_exporters(
+    hostname: Optional[str] = None
+):
+    """List all auto-discovered Prometheus exporters (from agent scraping)"""
+    client = get_clickhouse_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
+        
+        query = f"""
+            SELECT 
+                hostname,
+                category,
+                tags['scrape_target'] as scrape_target,
+                count(DISTINCT metric_name) as metric_count,
+                max(timestamp) as last_seen,
+                min(timestamp) as first_seen
+            FROM metrics
+            WHERE tags['source'] = 'prometheus'
+              AND timestamp > now() - INTERVAL 1 HOUR
+              {hostname_filter}
+            GROUP BY hostname, category, scrape_target
+            ORDER BY hostname, category
+        """
+        
+        result = client.client.execute(query)
+        
+        exporters = []
+        for row in result:
+            exporters.append({
+                "hostname": row[0],
+                "exporter_type": row[1],
+                "scrape_target": row[2],
+                "metric_count": row[3],
+                "last_seen": str(row[4]),
+                "first_seen": str(row[5]),
+                "status": "up" if (datetime.now() - row[4]).total_seconds() < 120 else "down"
+            })
+        
+        return {
+            "exporters": exporters,
+            "count": len(exporters),
+            "hostnames": list(set(e["hostname"] for e in exporters))
+        }
+    except Exception as e:
+        logger.error(f"Failed to list discovered exporters: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/discovered/metrics")
+async def list_discovered_metrics(
+    hostname: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 200
+):
+    """List all metrics from agent-discovered Prometheus exporters"""
+    client = get_clickhouse_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        conditions = ["tags['source'] = 'prometheus'", "timestamp > now() - INTERVAL 1 HOUR"]
+        
+        if hostname:
+            conditions.append(f"hostname = '{hostname}'")
+        if category:
+            conditions.append(f"category = '{category}'")
+        if search:
+            conditions.append(f"metric_name LIKE '%{search}%'")
+        
+        where_clause = " AND ".join(conditions)
+        
+        query = f"""
+            SELECT 
+                hostname,
+                category,
+                metric_name,
+                tags['metric_type'] as metric_type,
+                count() as sample_count,
+                avg(value) as avg_value,
+                min(value) as min_value,
+                max(value) as max_value,
+                max(timestamp) as last_seen
+            FROM metrics
+            WHERE {where_clause}
+            GROUP BY hostname, category, metric_name, metric_type
+            ORDER BY sample_count DESC
+            LIMIT {min(limit, 1000)}
+        """
+        
+        result = client.client.execute(query)
+        
+        metrics = []
+        for row in result:
+            metrics.append({
+                "hostname": row[0],
+                "category": row[1],
+                "metric_name": row[2],
+                "metric_type": row[3] or "untyped",
+                "sample_count": row[4],
+                "avg_value": round(row[5], 4) if row[5] else 0,
+                "min_value": round(row[6], 4) if row[6] else 0,
+                "max_value": round(row[7], 4) if row[7] else 0,
+                "last_seen": str(row[8])
+            })
+        
+        # Group by category for easier UI rendering
+        by_category = {}
+        for m in metrics:
+            cat = m["category"]
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(m)
+        
+        return {
+            "metrics": metrics,
+            "by_category": by_category,
+            "count": len(metrics),
+            "categories": list(by_category.keys())
+        }
+    except Exception as e:
+        logger.error(f"Failed to list discovered metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/discovered/series")
+async def get_discovered_series(
+    hostname: str,
+    metric_name: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    step: str = "1m",
+    aggregation: str = "avg"
+):
+    """Get time series data for an agent-discovered Prometheus metric"""
+    client = get_clickhouse_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Default time range: last hour
+        if not end:
+            end = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        if not start:
+            start = (datetime.now() - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Map step to ClickHouse interval
+        step_map = {
+            "15s": "toStartOfFifteenSeconds(timestamp)",
+            "1m": "toStartOfMinute(timestamp)",
+            "5m": "toStartOfFiveMinutes(timestamp)",
+            "15m": "toStartOfFifteenMinutes(timestamp)",
+            "1h": "toStartOfHour(timestamp)"
+        }
+        time_bucket = step_map.get(step, "toStartOfMinute(timestamp)")
+        
+        # Aggregation function
+        agg_func = aggregation.lower() if aggregation else "avg"
+        if agg_func not in ("sum", "avg", "max", "min", "count"):
+            agg_func = "avg"
+        
+        query = f"""
+            SELECT 
+                toString({time_bucket}) as ts,
+                {agg_func}(value) as agg_value,
+                min(value) as min_value,
+                max(value) as max_value
+            FROM metrics
+            WHERE hostname = '{hostname}'
+              AND metric_name = '{metric_name}'
+              AND tags['source'] = 'prometheus'
+              AND timestamp >= toDateTime('{start}')
+              AND timestamp <= toDateTime('{end}')
+            GROUP BY ts
+            ORDER BY ts
+        """
+        
+        result = client.client.execute(query)
+        
+        data = []
+        for row in result:
+            data.append({
+                "timestamp": row[0],
+                "value": round(row[1], 4) if row[1] else 0,
+                "min": round(row[2], 4) if row[2] else 0,
+                "max": round(row[3], 4) if row[3] else 0
+            })
+        
+        return {
+            "data": data,
+            "hostname": hostname,
+            "metric_name": metric_name,
+            "aggregation": agg_func,
+            "step": step,
+            "count": len(data)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get discovered series: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/discovered/categories")
+async def list_discovered_categories(hostname: Optional[str] = None):
+    """List all exporter categories with their metric counts"""
+    client = get_clickhouse_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
+        
+        query = f"""
+            SELECT 
+                category,
+                count(DISTINCT metric_name) as metric_count,
+                count(DISTINCT hostname) as host_count,
+                max(timestamp) as last_seen
+            FROM metrics
+            WHERE tags['source'] = 'prometheus'
+              AND timestamp > now() - INTERVAL 1 HOUR
+              {hostname_filter}
+            GROUP BY category
+            ORDER BY metric_count DESC
+        """
+        
+        result = client.client.execute(query)
+        
+        categories = []
+        for row in result:
+            categories.append({
+                "category": row[0],
+                "metric_count": row[1],
+                "host_count": row[2],
+                "last_seen": str(row[3])
+            })
+        
+        return {"categories": categories, "count": len(categories)}
+    except Exception as e:
+        logger.error(f"Failed to list categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

@@ -7,6 +7,7 @@ pub mod postgres_monitor;
 pub mod nginx_monitor;
 pub mod mongo_monitor;
 pub mod clickhouse_monitor;
+pub mod prometheus_scraper;
 
 pub use ebpf_collector::EbpfCollector;
 pub use proc_collector::ProcCollector;
@@ -17,3 +18,5 @@ pub use postgres_monitor::PostgresMonitor;
 pub use nginx_monitor::NginxMonitor;
 pub use mongo_monitor::MongoMonitor;
 pub use clickhouse_monitor::ClickHouseMonitor;
+pub use prometheus_scraper::PrometheusScraper;
+
