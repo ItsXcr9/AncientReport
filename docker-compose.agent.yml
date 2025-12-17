@@ -22,6 +22,7 @@ services:
       NATS_URL: nats://65.109.200.75:4222
       NATS_ENABLED: true
       AGENT_HOSTNAME: localtest
+      PROMETHEUS_ENABLED: true
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /sys/fs/bpf:/sys/fs/bpf:ro

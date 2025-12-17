@@ -1014,6 +1014,42 @@ def stop_scraper():
 # stored in metrics table with source=prometheus
 # ============================================
 
+# Port to exporter type mapping (common Prometheus exporters)
+EXPORTER_PORT_MAP = {
+    "9100": "node_exporter",
+    "9090": "prometheus",
+    "9104": "mysqld_exporter",
+    "9187": "postgres_exporter",
+    "9121": "redis_exporter",
+    "9308": "kafka_exporter",
+    "9113": "nginx_exporter",
+    "9216": "mongodb_exporter",
+    "9323": "docker_metrics",
+    "8080": "cadvisor",
+    "9115": "blackbox_exporter",
+    "9101": "haproxy_exporter",
+    "9102": "statsd_exporter",
+    "9256": "process_exporter",
+    "9419": "rabbitmq_exporter",
+    "15692": "rabbitmq",
+    "9091": "pushgateway",
+}
+
+def infer_exporter_type(scrape_target: str, category: str = "") -> str:
+    """Infer the exporter type from the scrape_target URL port"""
+    if category and category.strip():
+        return category
+    
+    # Try to extract port from URL like "http://127.0.0.1:9187/metrics"
+    import re
+    match = re.search(r':(\d+)/', scrape_target)
+    if match:
+        port = match.group(1)
+        return EXPORTER_PORT_MAP.get(port, f"port_{port}")
+    
+    return "unknown"
+
+
 @router.get("/discovered/exporters")
 async def list_discovered_exporters(
     hostname: Optional[str] = None
@@ -1046,10 +1082,14 @@ async def list_discovered_exporters(
         
         exporters = []
         for row in result:
+            scrape_target = row[2]
+            category = row[1]
+            exporter_type = infer_exporter_type(scrape_target, category)
+            
             exporters.append({
                 "hostname": row[0],
-                "exporter_type": row[1],
-                "scrape_target": row[2],
+                "exporter_type": exporter_type,
+                "scrape_target": scrape_target,
                 "metric_count": row[3],
                 "last_seen": str(row[4]),
                 "first_seen": str(row[5]),
@@ -1069,6 +1109,7 @@ async def list_discovered_exporters(
 @router.get("/discovered/metrics")
 async def list_discovered_metrics(
     hostname: Optional[str] = None,
+    scrape_target: Optional[str] = None,
     category: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = 200
@@ -1083,6 +1124,8 @@ async def list_discovered_metrics(
         
         if hostname:
             conditions.append(f"hostname = '{hostname}'")
+        if scrape_target:
+            conditions.append(f"tags['scrape_target'] = '{scrape_target}'")
         if category:
             conditions.append(f"tags['category'] = '{category}'")
         if search:
@@ -1145,10 +1188,10 @@ async def list_discovered_metrics(
 
 @router.get("/discovered/series")
 async def get_discovered_series(
-    hostname: str,
     metric_name: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    hostname: Optional[str] = None,
+    scrape_target: Optional[str] = None,
+    hours: int = 1,
     step: str = "1m",
     aggregation: str = "avg"
 ):
@@ -1158,11 +1201,9 @@ async def get_discovered_series(
         raise HTTPException(status_code=503, detail="Database not available")
     
     try:
-        # Default time range: last hour
-        if not end:
-            end = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        if not start:
-            start = (datetime.now() - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+        # Calculate time range
+        end = datetime.now()
+        start = end - timedelta(hours=hours)
         
         # Map step to ClickHouse interval
         step_map = {
@@ -1179,6 +1220,21 @@ async def get_discovered_series(
         if agg_func not in ("sum", "avg", "max", "min", "count"):
             agg_func = "avg"
         
+        # Build conditions
+        conditions = [
+            f"metric_name = '{metric_name}'",
+            "tags['source'] = 'prometheus'",
+            f"timestamp >= toDateTime('{start.strftime('%Y-%m-%d %H:%M:%S')}')",
+            f"timestamp <= toDateTime('{end.strftime('%Y-%m-%d %H:%M:%S')}')"
+        ]
+        
+        if hostname:
+            conditions.append(f"hostname = '{hostname}'")
+        if scrape_target:
+            conditions.append(f"tags['scrape_target'] = '{scrape_target}'")
+        
+        where_clause = " AND ".join(conditions)
+        
         query = f"""
             SELECT 
                 toString({time_bucket}) as ts,
@@ -1186,11 +1242,7 @@ async def get_discovered_series(
                 min(value) as min_value,
                 max(value) as max_value
             FROM metrics
-            WHERE hostname = '{hostname}'
-              AND metric_name = '{metric_name}'
-              AND tags['source'] = 'prometheus'
-              AND timestamp >= toDateTime('{start}')
-              AND timestamp <= toDateTime('{end}')
+            WHERE {where_clause}
             GROUP BY ts
             ORDER BY ts
         """

@@ -4,15 +4,16 @@
  */
 
 import { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Activity, Gauge, Clock, BarChart3, 
-  RefreshCw, Search, ChevronDown
+  RefreshCw, Search, ChevronDown, Radar, Zap, ExternalLink
 } from 'lucide-react';
 
 import { MetricTargetsPanel } from '../components/MetricTargetsPanel';
 import { ScrapedMetricChart } from '../components/ScrapedMetricChart';
+import { DiscoveredMetricChart } from '../components/DiscoveredMetricChart';
 import { ContainerApps } from '../components/ContainerApps';
 
 interface Target {
@@ -27,6 +28,28 @@ interface Target {
 interface AvailableMetric {
   name: string;
   sample_count: number;
+  last_seen: string;
+}
+
+interface DiscoveredExporter {
+  hostname: string;
+  exporter_type: string;
+  scrape_target: string;
+  metric_count: number;
+  last_seen: string;
+  first_seen: string;
+  status: 'up' | 'down';
+}
+
+interface DiscoveredMetric {
+  hostname: string;
+  category: string;
+  metric_name: string;
+  metric_type: string;
+  sample_count: number;
+  avg_value: number;
+  min_value: number;
+  max_value: number;
   last_seen: string;
 }
 
@@ -45,6 +68,14 @@ export default function Observability() {
   const [searchQuery, setSearchQuery] = useState('');
   const [timeRange, setTimeRange] = useState<'1h' | '6h' | '24h' | '7d'>('1h');
   const [showMetricSelector, setShowMetricSelector] = useState(false);
+  
+  // Discovered exporters state
+  const [discoveredExporters, setDiscoveredExporters] = useState<DiscoveredExporter[]>([]);
+  const [discoveredMetrics, setDiscoveredMetrics] = useState<DiscoveredMetric[]>([]);
+  const [selectedDiscoveredExporter, setSelectedDiscoveredExporter] = useState<string | null>(null);
+  const [selectedDiscoveredMetrics, setSelectedDiscoveredMetrics] = useState<string[]>([]);
+  const [discoveredSearchQuery, setDiscoveredSearchQuery] = useState('');
+  const [showDiscoveredMetricSelector, setShowDiscoveredMetricSelector] = useState(false);
 
   // Fetch targets
   useEffect(() => {
@@ -113,6 +144,72 @@ export default function Observability() {
       }
     });
   };
+
+  // Fetch discovered exporters
+  useEffect(() => {
+    const fetchDiscoveredExporters = async () => {
+      try {
+        const response = await fetch('/api/prometheus/discovered/exporters');
+        if (response.ok) {
+          const data = await response.json();
+          setDiscoveredExporters(data.exporters || []);
+          
+          // Auto-select first exporter if none selected
+          if (data.exporters?.length > 0 && !selectedDiscoveredExporter) {
+            setSelectedDiscoveredExporter(data.exporters[0].hostname);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch discovered exporters:', error);
+      }
+    };
+
+    fetchDiscoveredExporters();
+    const interval = setInterval(fetchDiscoveredExporters, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch discovered metrics when exporter changes
+  useEffect(() => {
+    if (!selectedDiscoveredExporter) {
+      setDiscoveredMetrics([]);
+      return;
+    }
+
+    const fetchDiscoveredMetrics = async () => {
+      try {
+        const response = await fetch(`/api/prometheus/discovered/metrics?scrape_target=${encodeURIComponent(selectedDiscoveredExporter)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setDiscoveredMetrics(data.metrics || []);
+          
+          // Auto-select first 4 metrics if none selected
+          if (selectedDiscoveredMetrics.length === 0 && data.metrics?.length > 0) {
+            const defaultM = data.metrics.slice(0, 4).map((m: DiscoveredMetric) => m.metric_name);
+            setSelectedDiscoveredMetrics(defaultM);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch discovered metrics:', error);
+      }
+    };
+
+    fetchDiscoveredMetrics();
+  }, [selectedDiscoveredExporter]);
+
+  const toggleDiscoveredMetric = (metricName: string) => {
+    setSelectedDiscoveredMetrics(prev => {
+      if (prev.includes(metricName)) {
+        return prev.filter(m => m !== metricName);
+      } else {
+        return [...prev, metricName];
+      }
+    });
+  };
+
+  const filteredDiscoveredMetrics = discoveredMetrics.filter(m =>
+    m.metric_name.toLowerCase().includes(discoveredSearchQuery.toLowerCase())
+  );
 
   const filteredMetrics = availableMetrics.filter(m => 
     m.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -288,6 +385,162 @@ export default function Observability() {
                 ? 'Select metrics to display charts'
                 : 'Select a target with metrics to view charts'
               }
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* Auto-Discovered Prometheus Dashboard */}
+      {discoveredExporters.length > 0 && (
+        <motion.div 
+          className="glass-card rounded-xl p-6 border border-green-500/20"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <Radar className="w-5 h-5 text-green-400" />
+              <h2 className="text-lg font-semibold text-green-400">Auto-Discovered Metrics</h2>
+              <span className="text-xs bg-green-500/10 text-green-400 px-2 py-1 rounded-full border border-green-500/30">
+                {discoveredExporters.length} exporter{discoveredExporters.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {/* Exporter Selector */}
+              <div className="relative">
+                <select
+                  value={selectedDiscoveredExporter || ''}
+                  onChange={(e) => {
+                    setSelectedDiscoveredExporter(e.target.value);
+                    setSelectedDiscoveredMetrics([]);
+                  }}
+                  className="appearance-none bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2 pr-8 text-sm text-white focus:outline-none focus:border-green-400 cursor-pointer min-w-[250px]"
+                >
+                  <option value="" disabled>Select Exporter</option>
+                  {discoveredExporters.map((exp, idx) => (
+                    <option key={`${exp.scrape_target}-${idx}`} value={exp.scrape_target}>
+                      {exp.exporter_type || 'unknown'} @ {exp.hostname} ({exp.metric_count} metrics)
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-green-400 pointer-events-none" />
+              </div>
+
+              <Link 
+                to="/prometheus-discovery"
+                className="flex items-center gap-2 px-3 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors text-sm"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Full View
+              </Link>
+            </div>
+          </div>
+
+          {/* Metric Selector */}
+          {selectedDiscoveredExporter && (
+            <div className="mb-6">
+              <div className="flex items-center gap-3 mb-3">
+                <button
+                  onClick={() => setShowDiscoveredMetricSelector(!showDiscoveredMetricSelector)}
+                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  <Zap className="w-4 h-4 text-green-400" />
+                  {selectedDiscoveredMetrics.length} metrics selected
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showDiscoveredMetricSelector ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+
+              {showDiscoveredMetricSelector && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-green-500/5 rounded-lg p-4 border border-green-500/20"
+                >
+                  {/* Search */}
+                  <div className="relative mb-3">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-green-400" />
+                    <input
+                      type="text"
+                      value={discoveredSearchQuery}
+                      onChange={(e) => setDiscoveredSearchQuery(e.target.value)}
+                      placeholder="Search discovered metrics..."
+                      className="w-full pl-10 pr-4 py-2 bg-white/5 border border-green-500/20 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-green-400"
+                    />
+                  </div>
+
+                  {/* Metrics Grid */}
+                  <div className="max-h-48 overflow-y-auto">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                      {filteredDiscoveredMetrics.map(metric => (
+                        <button
+                          key={metric.metric_name}
+                          onClick={() => toggleDiscoveredMetric(metric.metric_name)}
+                          className={`text-left px-3 py-2 rounded-lg text-xs transition-colors ${
+                            selectedDiscoveredMetrics.includes(metric.metric_name)
+                              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                              : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-transparent'
+                          }`}
+                        >
+                          <div className="truncate font-mono">{metric.metric_name}</div>
+                          <div className="text-gray-500 text-[10px] mt-0.5">
+                            {metric.sample_count} samples • avg: {metric.avg_value}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {filteredDiscoveredMetrics.length === 0 && (
+                    <div className="text-center text-gray-500 text-sm py-4">
+                      {discoveredSearchQuery ? 'No metrics match your search' : 'No metrics available yet'}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </div>
+          )}
+
+          {/* Info about the selected exporter */}
+          {selectedDiscoveredExporter && discoveredExporters.find(e => e.hostname === selectedDiscoveredExporter) && (
+            <div className="mb-4 p-3 bg-green-500/5 rounded-lg border border-green-500/20">
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-4">
+                  <span className="text-gray-400">Target:</span>
+                  <span className="font-mono text-green-400">
+                    {discoveredExporters.find(e => e.hostname === selectedDiscoveredExporter)?.scrape_target}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-green-400 shadow-lg shadow-green-500/50" />
+                  <span className="text-green-400 text-xs">Live</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Charts using DiscoveredMetricChart component */}
+          {selectedDiscoveredExporter && selectedDiscoveredMetrics.length > 0 ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {selectedDiscoveredMetrics.map((metric, index) => (
+                <DiscoveredMetricChart
+                  key={metric}
+                  scrapeTarget={selectedDiscoveredExporter}
+                  metricName={metric}
+                  color={chartColors[index % chartColors.length]}
+                  timeRange={timeRange}
+                  height={180}
+                />
+              ))}
+            </div>
+          ) : selectedDiscoveredExporter ? (
+            <div className="text-center py-12 text-gray-500">
+              Select metrics above to view charts
+            </div>
+          ) : (
+            <div className="text-center py-12 text-gray-500">
+              Select an exporter to view its metrics
             </div>
           )}
         </motion.div>
