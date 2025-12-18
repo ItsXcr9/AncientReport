@@ -92,6 +92,7 @@ export function DiscoveredMetricChart({
   const formatXAxis = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Tehran',
       hour: '2-digit',
       minute: '2-digit',
       hour12: false

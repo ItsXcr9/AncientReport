@@ -195,7 +195,7 @@ class CardinalityTracker:
                 self.metrics['limit_breaches'] += 1
                 
                 if action == 'drop':
-                    logger.warning(f"Global cardinality limit reached ({global_limit}), dropping: {series_key[:50]}...")
+                    logger.debug(f"Global cardinality limit reached ({global_limit}), dropping: {series_key[:50]}...")
                     return False, 'global_limit'
                 elif action == 'alert':
                     logger.error(f"ALERT: Global cardinality limit breach! {len(self.series_cache)}/{global_limit}")
@@ -210,7 +210,7 @@ class CardinalityTracker:
                 self.metrics['dropped_by_host'][hostname] += 1
                 
                 if action == 'drop':
-                    logger.warning(f"Host {hostname} cardinality limit reached ({host_limit}), dropping")
+                    logger.debug(f"Host {hostname} cardinality limit reached ({host_limit}), dropping")
                     return False, 'host_limit'
                 elif action == 'sample':
                     # Sample at 10%
@@ -226,7 +226,7 @@ class CardinalityTracker:
                 self.metrics['dropped_by_metric'][metric_name] += 1
                 
                 if action == 'drop':
-                    logger.warning(f"Metric {metric_name} cardinality limit reached ({metric_limit})")
+                    logger.debug(f"Metric {metric_name} cardinality limit reached ({metric_limit})")
                     return False, 'metric_limit'
                 elif action == 'sample':
                     if hash(series_key) % 10 != 0:

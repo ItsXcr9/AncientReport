@@ -13,6 +13,8 @@ services:
     privileged: true # Required for eBPF
     environment:
       TZ: ${TZ:-Asia/Tehran}
+      # Log level (warn = only warnings and errors)
+      RUST_LOG: AncientReport_agent=warn
       # Central ClickHouse connection - REQUIRED (V1 mode)
       CLICKHOUSE_HOST: 65.109.200.75
       CLICKHOUSE_PORT: 6123

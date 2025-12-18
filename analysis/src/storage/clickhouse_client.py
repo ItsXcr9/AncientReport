@@ -56,6 +56,19 @@ class ClickHouseClient:
             logger.error(f"Query failed: {e}")
             raise
     
+    def execute(self, sql: str, params: dict = None) -> List[tuple]:
+        """Synchronous query execution for backwards compatibility"""
+        try:
+            logger.debug(f"Executing sync query: {sql[:100]}...")
+            if params:
+                result = self.client.execute(sql, params)
+            else:
+                result = self.client.execute(sql)
+            return result
+        except Exception as e:
+            logger.error(f"Sync query failed: {e}")
+            raise
+    
     async def query_df(self, sql: str) -> Dict[str, Any]:
         """Execute a query and return as dictionary"""
         try:

@@ -311,10 +311,9 @@ impl DockerCollector {
 
         if !health_status_output.status.success() {
             let stderr = String::from_utf8_lossy(&health_status_output.stderr);
-            // Only log at debug level since this is expected for containers without health checks
-            if !stderr.contains("template") {
-                warn!("Failed to inspect health status for {}: {}", container_id, stderr);
-            }
+            // Only log at trace level since most containers don't have health checks
+            // Template errors are expected for containers without HEALTHCHECK instruction
+            tracing::trace!("Health check not available for {}: {}", container_id, stderr);
             return Ok(("none".to_string(), String::new(), 0, String::new()));
         }
 
