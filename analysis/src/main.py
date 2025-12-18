@@ -20,9 +20,10 @@ from api import security as security_api  # V3
 from api.custom_monitors import load_monitors_from_clickhouse as load_monitors
 from utils.timezone import now, from_iso, format_for_display, format_for_chart, TEHRAN_TZ
 
-# Configure logging
+# Configure logging - default to WARNING to reduce noise
+LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.WARNING),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -432,6 +433,30 @@ async def startup_event():
         replace_existing=True
     )
     logger.info("✓ Scheduled HTTP client refresh (every 6 hours)")
+    
+    # Schedule cardinality tracker cleanup (every hour to prevent memory leak)
+    async def cleanup_cardinality_cache():
+        """Clean up stale series from cardinality tracker to prevent memory leak"""
+        try:
+            from ingestion_gateway import CARDINALITY_ENABLED
+            from cardinality.tracker import get_cardinality_tracker
+            if CARDINALITY_ENABLED:
+                tracker = get_cardinality_tracker()
+                await tracker.cleanup_stale_series(max_age_hours=6)  # Clean entries not seen in 6 hours
+                stats = tracker.get_stats()
+                logger.info(f"✓ Cardinality cleanup: {stats['total_series']} active series, {stats['dropped_total']} dropped total")
+        except Exception as e:
+            logger.debug(f"Cardinality cleanup skipped: {e}")
+    
+    scheduler.add_job(
+        cleanup_cardinality_cache,
+        'interval',
+        hours=1,
+        id='cardinality_cleanup',
+        name='Cardinality Cache Cleanup',
+        replace_existing=True
+    )
+    logger.info("✓ Scheduled cardinality cache cleanup (every hour)")
     
     # Schedule comprehensive system health check (every minute)
     async def comprehensive_health_check_job():

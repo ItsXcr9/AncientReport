@@ -1415,7 +1415,7 @@ async def get_anomalies_from_clickhouse(
         """)
         
         anomalies = []
-        for row in result.result_rows:
+        for row in result:  # query() returns list directly, not object with result_rows
             anomalies.append(AnomalyEvent(
                 timestamp=str(row[0]),
                 event_type=row[1],

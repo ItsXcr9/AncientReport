@@ -70,11 +70,12 @@ class CardinalityTracker:
         self.host_series_count: Dict[str, int] = defaultdict(int)
         self.metric_series_count: Dict[str, int] = defaultdict(int)
         
-        # Limits (loaded from DB)
+        # Limits (loaded from DB) - reduced to prevent memory bloat
+        # At ~500 bytes per entry, 100k entries = ~50MB max
         self.limits = {
-            'global': 1_000_000,
-            'hostname': 50_000,
-            'metric': 10_000,
+            'global': 100_000,      # Reduced from 1M to 100k
+            'hostname': 10_000,     # Reduced from 50k to 10k
+            'metric': 2_000,        # Reduced from 10k to 2k
         }
         
         # Metrics for observability

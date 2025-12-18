@@ -34,7 +34,7 @@ except ImportError:
     METRICS_ENABLED = False
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Enable DEBUG logging for ingestion gateway
+# Note: Log level now inherited from global config (default WARNING)
 
 # Will be set by main.py to enable WebSocket broadcasting
 websocket_broadcast_func = None

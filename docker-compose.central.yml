@@ -40,7 +40,12 @@ services:
       CLICKHOUSE_PASSWORD: AncientReport
     networks:
       - AncientReport
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
     logging:
       driver: syslog
       options:
@@ -60,10 +65,9 @@ services:
       nofile:
         soft: 65535
         hard: 65535
-    deploy:
-      resources:
-        limits:
-          memory: 6G
+    # Memory limit to prevent OOM killing other services
+    mem_limit: 2g
+    memswap_limit: 2g
     environment:
       TZ: Asia/Tehran
       CLICKHOUSE_HOST: clickhouse
@@ -76,6 +80,9 @@ services:
       AI_MODEL: gemini-2.5-flash-lite
       # V2 Mode: Enable NATS ingestion gateway (comment out to use V1 legacy mode)
       NATS_URL: nats://nats:4222
+      # Worker recycling to prevent memory leaks
+      UVICORN_WORKERS: "2"
+      UVICORN_LIMIT_MAX_REQUESTS: "1000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./analysis/src:/app/src:ro
@@ -84,7 +91,14 @@ services:
       - nats
     networks:
       - AncientReport
-    restart: unless-stopped
+    # Healthcheck for auto-restart on failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8800/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: always
     logging:
       driver: syslog
       options:

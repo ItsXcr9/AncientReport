@@ -21,11 +21,11 @@ use security::{PortScanner, ContainerScanner};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
+    // Initialize logging - default to warn to reduce noise
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "AncientReport_agent=info".into()),
+                .unwrap_or_else(|_| "AncientReport_agent=warn".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

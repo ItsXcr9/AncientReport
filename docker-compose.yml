@@ -40,6 +40,12 @@ services:
       CLICKHOUSE_PASSWORD: AncientReport
     networks:
       - AncientReport
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     logging:
       driver: syslog
       options:
@@ -109,6 +115,9 @@ services:
       REMEDIATION_REAL_MODE: "true"
       # Host machine's hostname for multi-server support
       SERVER_HOSTNAME: ${HOSTNAME:-unknown}
+      # Worker recycling to prevent memory leaks
+      UVICORN_WORKERS: "2"
+      UVICORN_LIMIT_MAX_REQUESTS: "1000"
     volumes:
       - ./analysis/src:/app/src
       - /var/run/docker.sock:/var/run/docker.sock
@@ -119,11 +128,21 @@ services:
       - nats
     networks:
       - AncientReport
+    # Memory limit to prevent OOM killing other services
+    mem_limit: 2g
+    memswap_limit: 2g
+    # Healthcheck for auto-restart on failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8800/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
-    restart: unless-stopped
+    restart: always
     logging:
       driver: syslog
       options:
