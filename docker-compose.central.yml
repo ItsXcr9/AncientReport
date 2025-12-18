@@ -75,7 +75,7 @@ services:
       CLICKHOUSE_DB: AncientReport
       CLICKHOUSE_USER: AncientReport
       CLICKHOUSE_PASSWORD: AncientReport
-      GEMINI_API_KEY: AIzaSyBPVfd9gaxGvc0FWZzcruZghvWa7MCTcJQ
+      GEMINI_API_KEY: AIzaSyBvssnoOoy97ECs9q8FLbEGkj2DafA_BZc
       AI_PROVIDER: google
       AI_MODEL: gemini-2.5-flash-lite
       # V2 Mode: Enable NATS ingestion gateway (comment out to use V1 legacy mode)
