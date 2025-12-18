@@ -399,7 +399,7 @@ class AdvancedPredictor:
         std = np.std(historical_values)
         z_score = (current_value - mean) / std if std > 0 else 0
         
-        is_anomaly = prediction == -1
+        is_anomaly = bool(prediction == -1)  # Convert numpy.bool_ to Python bool
         
         # Determine severity
         if probability > 0.8:
@@ -431,12 +431,12 @@ class AdvancedPredictor:
         return AnomalyPrediction(
             metric=metric,
             hostname=hostname,
-            current_value=round(current_value, 2),
-            anomaly_probability=round(probability, 3),
+            current_value=float(round(current_value, 2)),
+            anomaly_probability=float(round(probability, 3)),
             is_anomaly=is_anomaly,
             severity=severity,
             direction=direction,
-            z_score=round(z_score, 2),
+            z_score=float(round(z_score, 2)),
             recommendation=recommendation,
             method="isolation_forest"
         )
@@ -457,7 +457,7 @@ class AdvancedPredictor:
         # Probability based on z-score (using 3-sigma rule)
         probability = min(1.0, abs(z_score) / 3.5)
         
-        is_anomaly = abs(z_score) > 2.5
+        is_anomaly = bool(abs(z_score) > 2.5)  # Convert numpy.bool_ to Python bool
         
         # Severity
         if abs(z_score) > 4:
@@ -485,12 +485,12 @@ class AdvancedPredictor:
         return AnomalyPrediction(
             metric=metric,
             hostname=hostname,
-            current_value=round(current_value, 2),
-            anomaly_probability=round(probability, 3),
+            current_value=float(round(current_value, 2)),
+            anomaly_probability=float(round(probability, 3)),
             is_anomaly=is_anomaly,
             severity=severity,
             direction=direction,
-            z_score=round(z_score, 2),
+            z_score=float(round(z_score, 2)),
             recommendation=recommendation,
             method="z_score"
         )

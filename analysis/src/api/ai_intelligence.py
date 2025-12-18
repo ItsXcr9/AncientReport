@@ -159,11 +159,11 @@ async def correlate_recent_alerts(hours: int = 24, time_window: int = 300):
         # Fetch recent alerts from ClickHouse
         result = await ch.query(f"""
             SELECT 
-                alert_name as name,
+                rule_name,
                 hostname,
-                severity,
-                state,
-                toString(timestamp) as timestamp
+                toString(severity),
+                if(resolved, 'resolved', 'firing'),
+                toString(timestamp)
             FROM alert_history
             WHERE timestamp >= now() - INTERVAL {hours} HOUR
             ORDER BY timestamp
