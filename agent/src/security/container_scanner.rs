@@ -55,10 +55,10 @@ impl ContainerScanner {
         ContainerScanner { hostname }
     }
 
-    /// Get list of running Docker containers
-    fn get_running_containers(&self) -> Result<Vec<String>> {
+    /// Get list of running Docker containers with their images
+    fn get_running_containers(&self) -> Result<Vec<(String, String)>> {
         let output = Command::new("docker")
-            .args(["ps", "--format", "{{.Names}}"])
+            .args(["ps", "--format", "{{.Names}}|{{.Image}}"])
             .output()
             .context("Failed to execute docker ps")?;
 
@@ -68,17 +68,26 @@ impl ContainerScanner {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let containers: Vec<String> = stdout
+        let containers: Vec<(String, String)> = stdout
             .lines()
             .filter(|line| !line.is_empty())
-            .map(|s| s.to_string())
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split('|').collect();
+                if parts.len() >= 2 {
+                    Some((parts[0].to_string(), parts[1].to_string()))
+                } else {
+                    None
+                }
+            })
             .collect();
 
         Ok(containers)
     }
 
     /// Scan a single container with Trivy
-    pub fn scan_container(&self, container_name: &str) -> ContainerScanResult {
+    /// container_name: the Docker container name (for logging/identification)
+    /// image_name: the Docker image name (for Trivy to scan)
+    pub fn scan_container(&self, container_name: &str, image_name: &str) -> ContainerScanResult {
         let scan_id = format!(
             "scan-{}-{}",
             Utc::now().format("%Y%m%d%H%M%S"),
@@ -86,9 +95,9 @@ impl ContainerScanner {
         );
         let started_at = Utc::now().format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
 
-        info!("Scanning container {} with Trivy...", container_name);
+        info!("Scanning container {} (image: {}) with Trivy...", container_name, image_name);
 
-        // Run Trivy scan
+        // Run Trivy scan on the IMAGE (not the container name)
         // Note: Using 'image' instead of 'container' (more compatible across Trivy versions)
         // Removed deprecated --no-progress flag (--quiet is sufficient)
         let output = Command::new("trivy")
@@ -97,7 +106,7 @@ impl ContainerScanner {
                 "--format", "json",
                 "--quiet",
                 "--scanners", "vuln",
-                container_name,
+                image_name,  // Use image name, not container name!
             ])
             .output();
 
@@ -195,8 +204,8 @@ impl ContainerScanner {
         match self.get_running_containers() {
             Ok(containers) => {
                 info!("Found {} running containers to scan", containers.len());
-                for container in containers {
-                    let result = self.scan_container(&container);
+                for (container_name, image_name) in containers {
+                    let result = self.scan_container(&container_name, &image_name);
                     results.push(result);
                 }
             }
