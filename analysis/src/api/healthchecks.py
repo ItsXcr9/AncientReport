@@ -125,3 +125,84 @@ async def get_container_healthchecks(hostname: Optional[str] = Query(None)):
     except Exception as e:
         logger.error(f"Failed to fetch healthcheck status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/healthchecks/history", response_model=List[Dict[str, Any]])
+async def get_healthcheck_history(
+    container_id: Optional[str] = Query(None),
+    hostname: Optional[str] = Query(None),
+    hours: int = Query(24, ge=1, le=168)
+):
+    """
+    Get healthcheck status history showing changes over time.
+    Returns the last N hours of healthcheck data with status transitions.
+    
+    Args:
+        container_id: Optional filter for a specific container
+        hostname: Optional filter for a specific server
+        hours: Number of hours of history to fetch (default 24, max 168/1 week)
+    """
+    global clickhouse_client
+    
+    if clickhouse_client is None:
+        from storage.clickhouse_client import ClickHouseClient
+        clickhouse_client = ClickHouseClient(
+            host=os.getenv("CLICKHOUSE_HOST", "clickhouse"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            database=os.getenv("CLICKHOUSE_DB", "AncientReport"),
+            user=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", "")
+        )
+    
+    try:
+        # Query to get healthcheck status changes over time
+        # We sample data every 5 minutes to avoid huge result sets
+        query = f"""
+        SELECT 
+            container_id,
+            container_name,
+            health_status,
+            failing_streak,
+            hostname,
+            toStartOfFiveMinutes(timestamp) as time_bucket,
+            max(timestamp) as latest_in_bucket
+        FROM docker_containers
+        WHERE timestamp > now() - INTERVAL {hours} HOUR
+          AND container_id != ''
+          AND container_id IS NOT NULL
+          AND health_status != ''
+          AND health_status != 'none'
+        """
+        
+        if container_id:
+            query += f"\n          AND container_id = '{container_id}'"
+        if hostname:
+            query += f"\n          AND hostname = '{hostname}'"
+        
+        query += """
+        GROUP BY container_id, container_name, health_status, failing_streak, hostname, time_bucket
+        ORDER BY container_id, time_bucket DESC
+        LIMIT 1000
+        """
+        
+        logger.info(f"Fetching healthcheck history for {hours}h")
+        results = await clickhouse_client.query(query)
+        
+        # Group by container and detect status transitions
+        history = []
+        for row in results:
+            history.append({
+                "container_id": row[0][:12] if row[0] else "",
+                "container_name": str(row[1]).lstrip('/') if row[1] else "",
+                "health_status": row[2] if row[2] else "unknown",
+                "failing_streak": int(row[3]) if row[3] is not None else 0,
+                "hostname": row[4] if row[4] else "unknown",
+                "timestamp": str(row[6]) if row[6] else str(row[5])
+            })
+        
+        logger.info(f"Returning {len(history)} history entries")
+        return history
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch healthcheck history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, CheckCircle, XCircle, Clock, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Activity, CheckCircle, XCircle, Clock, AlertCircle, ChevronDown, ChevronUp, Filter, History } from 'lucide-react';
 
 interface ContainerHealthcheck {
   id: string;
@@ -21,6 +21,9 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [showAll, setShowAll] = useState(false);
+  const [showProblemsOnly, setShowProblemsOnly] = useState(false);
+  const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
 
   const fetchHealthchecks = async () => {
     try {
@@ -60,12 +63,20 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
     return (priority[a.health_status] || 4) - (priority[b.health_status] || 4);
   });
 
-  // Split into visible (top 3) and rest
-  const visibleHealthchecks = sortedHealthchecks.slice(0, 3);
-  const otherHealthchecks = sortedHealthchecks.slice(3);
+  // Apply filter if showProblemsOnly is active
+  const filteredHealthchecks = showProblemsOnly
+    ? sortedHealthchecks.filter(h => h.health_status === 'unhealthy' || h.health_status === 'starting')
+    : sortedHealthchecks;
 
-  // Count problems
-  const problemCount = healthchecks.filter(h => h.health_status === 'unhealthy').length;
+  // Split into visible (top 3) and rest
+  const visibleHealthchecks = filteredHealthchecks.slice(0, 3);
+  const otherHealthchecks = filteredHealthchecks.slice(3);
+
+  // Count problems - unhealthy or starting with failures
+  const unhealthyCount = healthchecks.filter(h => h.health_status === 'unhealthy').length;
+  const startingCount = healthchecks.filter(h => h.health_status === 'starting').length;
+  const healthyCount = healthchecks.filter(h => h.health_status === 'healthy').length;
+  const problemCount = unhealthyCount + startingCount;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -169,17 +180,53 @@ export const ContainerHealthchecks: React.FC<ContainerHealthchecksProps> = ({ se
           <Activity className="w-5 h-5 text-blue-400" />
           Container Healthchecks
           <span className="text-sm font-normal text-gray-400 ml-2">
-            ({healthchecks.length} {healthchecks.length === 1 ? 'container' : 'containers'})
+            ({filteredHealthchecks.length}{showProblemsOnly ? ' problems' : ''} of {healthchecks.length})
           </span>
           {problemCount > 0 && (
             <span className="ml-2 px-2 py-0.5 bg-red-500/20 border border-red-500/30 text-red-400 rounded text-xs font-medium">
-              {problemCount} problem{problemCount > 1 ? 's' : ''}
+              {unhealthyCount > 0 && `${unhealthyCount} unhealthy`}
+              {unhealthyCount > 0 && startingCount > 0 && ', '}
+              {startingCount > 0 && `${startingCount} starting`}
             </span>
           )}
         </h2>
-        <div className="text-xs text-gray-400">
-          Updated: {lastUpdated.toLocaleTimeString()}
+        <div className="flex items-center gap-3">
+          {/* Filter Toggle */}
+          <button
+            onClick={() => setShowProblemsOnly(!showProblemsOnly)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              showProblemsOnly
+                ? 'bg-red-500/20 border border-red-500/30 text-red-400'
+                : 'bg-white/5 border border-white/10 text-gray-400 hover:bg-white/10'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            {showProblemsOnly ? 'Showing Problems' : 'Show All'}
+          </button>
+          <div className="text-xs text-gray-400">
+            Updated: {lastUpdated.toLocaleTimeString()}
+          </div>
         </div>
+      </div>
+
+      {/* Status Summary Bar */}
+      <div className="flex gap-3 mb-4">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-green-500/10 border border-green-500/20">
+          <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+          <span className="text-xs text-green-400">{healthyCount} healthy</span>
+        </div>
+        {unhealthyCount > 0 && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-red-500/10 border border-red-500/20">
+            <XCircle className="w-3.5 h-3.5 text-red-400" />
+            <span className="text-xs text-red-400">{unhealthyCount} unhealthy</span>
+          </div>
+        )}
+        {startingCount > 0 && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-yellow-500/10 border border-yellow-500/20">
+            <Clock className="w-3.5 h-3.5 text-yellow-400" />
+            <span className="text-xs text-yellow-400">{startingCount} starting</span>
+          </div>
+        )}
       </div>
 
       {error && (
