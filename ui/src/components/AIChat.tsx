@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   MessageSquare, Send, Bot, User, Sparkles, 
-  ChevronDown, Minimize2, Maximize2, X 
+  ChevronDown, Minimize2, Maximize2, X, Activity 
 } from 'lucide-react';
 
 interface ChatMessage {

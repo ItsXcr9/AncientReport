@@ -59,6 +59,7 @@ from api import security_scanning as sec_scan_api
 from api.security_scanning import load_scans_from_clickhouse as load_security_scans, start_nats_subscriber as start_security_nats_subscriber
 from api import ai_chat as ai_chat_api
 from api import auto_remediation as remediation_api
+from api import ai_intelligence as ai_intelligence_api  # V3 AI Intelligence
 app.include_router(custom_monitors.router, tags=["V3 Custom Monitors"])
 app.include_router(security_api.router, tags=["V3 Security"])
 app.include_router(alerts_api.router, tags=["V3 Alerts"])
@@ -66,6 +67,7 @@ app.include_router(topology_api.router, tags=["V3 Topology"])
 app.include_router(ebpf_api.router, tags=["V3 eBPF Data"])
 app.include_router(sec_scan_api.router, tags=["V3 Security Scanning"])
 app.include_router(ai_chat_api.router, tags=["V3 AI Chat"])
+app.include_router(ai_intelligence_api.router, tags=["V3 AI Intelligence"])
 app.include_router(remediation_api.router, tags=["V3 Auto-Remediation"])
 
 # Register V3 Container Application Monitoring (Kafka, Redis, PostgreSQL)
