@@ -20,6 +20,7 @@ import RecordingRules from './pages/RecordingRules';
 import SNMPMonitoring from './pages/SNMPMonitoring';
 import SystemHealth from './pages/SystemHealth';
 import PrometheusDiscovery from './pages/PrometheusDiscovery';
+import AIIntelligence from './pages/AIIntelligence';
 
 import { SettingsModal } from './components/SettingsModal';
 import { AIChat } from './components/AIChat';
@@ -353,6 +354,7 @@ function App() {
                 <Route path="snmp" element={<SNMPMonitoring />} />
                 <Route path="system-health" element={<SystemHealth />} />
                 <Route path="prometheus-discovery" element={<PrometheusDiscovery />} />
+                <Route path="ai-intelligence" element={<AIIntelligence />} />
             </Route>
         </Routes>
         

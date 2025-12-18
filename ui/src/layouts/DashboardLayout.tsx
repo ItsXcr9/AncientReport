@@ -13,7 +13,8 @@ import {
   Bell,
   Layers,
   Network,
-  HeartPulse
+  HeartPulse,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -39,6 +40,7 @@ export function DashboardLayout({ children, header, outletContext }: DashboardLa
     { name: 'Recording Rules', path: '/recording-rules', icon: Layers },
     { name: 'Security', path: '/security', icon: Shield },
     { name: 'Analysis', path: '/analysis', icon: Brain },
+    { name: 'AI Intelligence', path: '/ai-intelligence', icon: Sparkles },
     { name: 'System Health', path: '/system-health', icon: HeartPulse },
   ];
 

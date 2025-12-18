@@ -2,6 +2,7 @@
 import { Activity, Brain, CheckCircle, Database, Cpu, HardDrive, TrendingUp, Loader2, Clock, Server, AlertTriangle, AlertCircle, Zap, RefreshCw } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ServerInfoCard } from '../components/ServerInfoCard';
+import { PredictionsWidget } from '../components/PredictionsWidget';
 import { useOutletContext } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
@@ -174,6 +175,11 @@ export default function DashboardHome() {
             ))}
           </div>
         )}
+
+      {/* AI Predictions Widget */}
+      <div className="mb-6">
+        <PredictionsWidget hostname={selectedServer || 'xcr9'} />
+      </div>
 
       {/* Hero Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
