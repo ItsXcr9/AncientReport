@@ -105,7 +105,7 @@ class AdvancedPredictor:
                 ORDER BY day
             """)
             
-            if len(history) < 7:
+            if len(history) < 2:
                 logger.warning(f"Insufficient data for {metric} prediction on {hostname}")
                 return None
             
@@ -119,8 +119,14 @@ class AdvancedPredictor:
                 )
                 
         except Exception as e:
-            logger.error(f"Prediction failed for {metric}: {e}")
-            return None
+            logger.error(f"Prophet prediction failed for {metric}: {e}. Falling back to linear regression.")
+            try:
+                return await self._predict_with_linear_regression(
+                    history, metric, hostname, threshold, forecast_days
+                )
+            except Exception as fallback_error:
+                logger.error(f"Fallback prediction also failed for {metric}: {fallback_error}")
+                return None
     
     async def _predict_with_prophet(
         self,

@@ -865,15 +865,15 @@ async def get_servers_info():
         
         for hostname in servers:
             # Fetch latest hardware metrics for this server
-            # Hardware info doesn't change often, so look back 7 days
+            # Look back 1 day (hardware info doesn't change often)
             info_query = f"""
             SELECT 
                 metric_name,
                 argMax(value, timestamp) as value
             FROM metrics
+            PREWHERE timestamp >= now() - INTERVAL 1 DAY
             WHERE hostname = '{hostname}'
               AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb', 'disk_used_gb')
-              AND timestamp >= now() - INTERVAL 7 DAY
             GROUP BY metric_name
             """
             
@@ -919,15 +919,15 @@ async def get_server_info(hostname: str):
     """Get hardware information for a specific server"""
     try:
         # Fetch latest hardware metrics for this server
-        # Hardware info doesn't change often, so look back 7 days
+        # Look back 1 day (hardware info doesn't change often)
         info_query = f"""
         SELECT 
             metric_name,
             argMax(value, timestamp) as value
         FROM metrics
+        PREWHERE timestamp >= now() - INTERVAL 1 DAY
         WHERE hostname = '{hostname}'
           AND metric_name IN ('cpu_cores', 'memory_total_mb', 'disk_total_gb', 'disk_used_gb')
-          AND timestamp >= now() - INTERVAL 7 DAY
         GROUP BY metric_name
         """
         

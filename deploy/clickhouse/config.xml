@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <!-- Performance Settings -->
+    <max_concurrent_queries>100</max_concurrent_queries>
+    <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
+    <max_table_size_to_drop>0</max_table_size_to_drop>
+    
+    <!-- Background operations - tuned for metrics workload -->
+    <background_pool_size>16</background_pool_size>
+    <background_schedule_pool_size>16</background_schedule_pool_size>
+    <background_fetches_pool_size>8</background_fetches_pool_size>
+    <background_move_pool_size>8</background_move_pool_size>
+    <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+    
+    <!-- MergeTree settings for high-volume metrics ingestion -->
+    <merge_tree>
+        <max_suspicious_broken_parts>5</max_suspicious_broken_parts>
+        <parts_to_throw_insert>300</parts_to_throw_insert>
+        <parts_to_delay_insert>150</parts_to_delay_insert>
+        <max_bytes_to_merge_at_max_space_in_pool>161061273600</max_bytes_to_merge_at_max_space_in_pool>
+    </merge_tree>
+    
+    <!-- Query settings -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+    
+    <!-- Disable unnecessary logs for performance -->
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <part_log remove="1"/>
+    
+    <!-- Compression - LZ4 for faster inserts -->
+    <compression>
+        <case>
+            <min_part_size>10485760</min_part_size>
+            <min_part_size_ratio>0.01</min_part_size_ratio>
+            <method>lz4</method>
+        </case>
+    </compression>
+    
+    <!-- Network settings -->
+    <listen_host>::</listen_host>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    
+    <!-- Keep alive for long-running connections -->
+    <keep_alive_timeout>3</keep_alive_timeout>
+    
+    <!-- Timezone -->
+    <timezone>Asia/Tehran</timezone>
+</clickhouse>

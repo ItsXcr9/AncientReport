@@ -156,34 +156,29 @@ class ClickHouseClient:
         limit: int = 1000,
         hostname: str = None
     ) -> List[tuple]:
-        """Fetch raw metrics for charting - expects UTC datetime (ClickHouse stores in UTC)"""
+        """Fetch raw metrics for charting - expects UTC datetime (ClickHouse stores in UTC)
         
-        # Ensure timezone-aware datetime - assume system local time (Tehran) if naive
-        # or just let timestamp() handle it (it uses system local for naive)
-        pass
+        Uses PREWHERE for timestamp filtering which evaluates on compressed data
+        before decompression, dramatically reducing I/O for time-range queries.
+        """
         
         # Use Unix timestamps for timezone-safe conversion
         start_ts = int(start_time.timestamp())
         end_ts = int(end_time.timestamp())
         
-        # Build WHERE clause with optional hostname filter
-        where_clauses = [
-            f"timestamp >= toDateTime({start_ts})",
-            f"timestamp <= toDateTime({end_ts})",
-            f"metric_name = '{metric_name}'"
-        ]
+        # Build hostname filter if provided
+        hostname_filter = f"AND hostname = '{hostname}'" if hostname else ""
         
-        if hostname:
-            where_clauses.append(f"hostname = '{hostname}'")
-        
-        where_clause = " AND ".join(where_clauses)
-        
+        # Use PREWHERE for timestamp (most selective filter) - evaluates before decompression
+        # This is a ClickHouse-specific optimization that can reduce I/O significantly
         sql = f"""
         SELECT 
             timestamp,
             value
         FROM metrics
-        WHERE {where_clause}
+        PREWHERE timestamp >= toDateTime({start_ts}) AND timestamp <= toDateTime({end_ts})
+        WHERE metric_name = '{metric_name}'
+        {hostname_filter}
         ORDER BY timestamp ASC
         LIMIT {limit}
         """
@@ -205,17 +200,43 @@ class ClickHouseClient:
             logger.error(f"Insert failed: {e}")
             raise
 
-    async def get_active_servers(self, hours: int = 24) -> List[str]:
+    async def get_active_servers(self, hours: int = 1) -> List[str]:
         """Get list of servers that have reported metrics recently
         
-        Filters out container IDs (12-char hex strings) that shouldn't be treated as hostnames
+        Uses PREWHERE for efficient timestamp filtering.
+        Defaults to 1 hour lookback to avoid scanning millions of rows.
+        Filters out container IDs (12-char hex strings) that shouldn't be treated as hostnames.
         """
         try:
+            # Try aggregated table first (much faster - only recent data)
+            try:
+                agg_sql = f"""
+                SELECT DISTINCT hostname 
+                FROM metrics_5min_agg 
+                WHERE ts >= now() - INTERVAL {hours} HOUR
+                  AND hostname != ''
+                  AND length(hostname) != 12
+                ORDER BY hostname
+                """
+                result = await self.query(agg_sql)
+                if result:
+                    servers = []
+                    for row in result:
+                        hostname = row[0]
+                        if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
+                            continue
+                        servers.append(hostname)
+                    if servers:
+                        return servers
+            except Exception:
+                pass  # Fall through to main table
+            
+            # Fallback to main metrics table with PREWHERE for efficiency
             sql = f"""
             SELECT DISTINCT hostname 
             FROM metrics 
-            WHERE timestamp >= now() - INTERVAL {hours} HOUR
-              AND hostname != ''
+            PREWHERE timestamp >= now() - INTERVAL {hours} HOUR
+            WHERE hostname != ''
               AND length(hostname) != 12
             ORDER BY hostname
             """
@@ -235,3 +256,4 @@ class ClickHouseClient:
         except Exception as e:
             logger.error(f"Failed to get active servers: {e}")
             return []
+

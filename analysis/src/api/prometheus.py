@@ -27,7 +27,7 @@ _http_client: Optional[httpx.AsyncClient] = None
 
 # Semaphore to limit concurrent scrapes (prevents file descriptor exhaustion)
 _scrape_semaphore: Optional[asyncio.Semaphore] = None
-MAX_CONCURRENT_SCRAPES = 10  # Maximum simultaneous scrape requests
+MAX_CONCURRENT_SCRAPES = 5  # Reduced from 10 to prevent load spikes
 
 async def get_http_client() -> httpx.AsyncClient:
     """Get or create the shared HTTP client with connection pooling"""
@@ -61,7 +61,7 @@ async def close_http_client():
 class TargetCreate(BaseModel):
     name: str
     url: str
-    scrape_interval: int = 15
+    scrape_interval: int = 60  # Increased default from 15s to 60s for safety
     timeout: int = 10
     labels: Dict[str, str] = {}
     enabled: bool = True
@@ -986,10 +986,13 @@ async def run_scraper_loop():
                 # Scrape in background
                 asyncio.create_task(_scrape_url(client, target_id, name, url, timeout, static_labels))
             
-            await asyncio.sleep(5)  # Check every 5 seconds
+            # Add random jitter to prevent thundering herd
+            import random
+            jitter = random.uniform(0.1, 2.0)
+            await asyncio.sleep(5 + jitter)  # Check every ~5-7 seconds
         except Exception as e:
             logger.error(f"Scraper loop error: {e}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(30)  # Back off on error
 
 
 def start_scraper():

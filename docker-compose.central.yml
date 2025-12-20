@@ -29,28 +29,48 @@ services:
     ports:
       # Expose to 0.0.0.0 to allow remote agents to connect
       - "0.0.0.0:6123:8123"  # HTTP interface for remote agents
-      - "0.0.0.0:6001:9000"  # Native protocol (optional)
+      - "0.0.0.0:6001:9000"  # Native protocol
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ./deploy/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./deploy/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
     environment:
       TZ: Asia/Tehran
       CLICKHOUSE_DB: AncientReport
       CLICKHOUSE_USER: AncientReport
       CLICKHOUSE_PASSWORD: AncientReport
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     networks:
       - AncientReport
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+      start_period: 30s
     restart: always
     logging:
-      driver: syslog
+      driver: "json-file"
       options:
-        syslog-address: "udp://65.109.200.75:5515"
-        tag: "{{.Name}}"
+        max-size: "50m"
+        max-file: "3"
+    # Resource limits - adjust based on server capacity
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 12G
+        reservations:
+          cpus: '4'
+          memory: 6G
+
+
 
   # Python analysis engine
   analysis:
@@ -131,6 +151,7 @@ services:
 volumes:
   nats_data:
   clickhouse_data:
+  clickhouse_logs:
 
 networks:
   AncientReport:

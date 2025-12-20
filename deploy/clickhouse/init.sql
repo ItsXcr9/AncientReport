@@ -2,12 +2,13 @@
 -- Time-series metrics storage optimized for fast analytics
 
 -- Raw metrics table (1-minute aggregations)
+-- Optimized with LowCardinality for low-entropy strings and compression codecs
 CREATE TABLE IF NOT EXISTS metrics (
-    timestamp DateTime,
-    hostname String,
-    metric_type String,
-    metric_name String,
-    value Float64,
+    timestamp DateTime CODEC(DoubleDelta, ZSTD(1)),
+    hostname LowCardinality(String),
+    metric_type LowCardinality(String),
+    metric_name LowCardinality(String),
+    value Float64 CODEC(Gorilla, ZSTD(1)),
     tags Map(String, String)
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
@@ -68,24 +69,25 @@ ORDER BY (hostname, timestamp)
 TTL timestamp + INTERVAL 90 DAY;
 
 -- Docker container stats
+-- Optimized with LowCardinality for status and hostname
 CREATE TABLE IF NOT EXISTS docker_containers (
-    timestamp DateTime,
+    timestamp DateTime CODEC(DoubleDelta, ZSTD(1)),
     container_id String,
     container_name String,
     image String,
-    status String,
-    cpu_percent Float64,
-    memory_usage UInt64,
-    memory_limit UInt64,
-    memory_percent Float64,
-    network_rx_bytes UInt64,
-    network_tx_bytes UInt64,
-    block_read_bytes UInt64,
-    block_write_bytes UInt64,
-    uptime_seconds UInt64,
+    status LowCardinality(String),
+    cpu_percent Float64 CODEC(Gorilla, ZSTD(1)),
+    memory_usage UInt64 CODEC(T64, ZSTD(1)),
+    memory_limit UInt64 CODEC(T64, ZSTD(1)),
+    memory_percent Float64 CODEC(Gorilla, ZSTD(1)),
+    network_rx_bytes UInt64 CODEC(T64, ZSTD(1)),
+    network_tx_bytes UInt64 CODEC(T64, ZSTD(1)),
+    block_read_bytes UInt64 CODEC(T64, ZSTD(1)),
+    block_write_bytes UInt64 CODEC(T64, ZSTD(1)),
+    uptime_seconds UInt64 CODEC(T64, ZSTD(1)),
     restart_count UInt32,
     created_at DateTime,
-    hostname String DEFAULT ''
+    hostname LowCardinality(String) DEFAULT ''
 ) ENGINE = MergeTree()
 ORDER BY (hostname, timestamp, container_id)
 TTL timestamp + INTERVAL 30 DAY;
