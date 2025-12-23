@@ -16,12 +16,12 @@ services:
       # Log level (warn = only warnings and errors)
       RUST_LOG: AncientReport_agent=warn
       # Central ClickHouse connection - REQUIRED (V1 mode)
-      CLICKHOUSE_HOST: 65.109.200.75
+      CLICKHOUSE_HOST: ${CENTRAL_SERVER_IP:-localhost}
       CLICKHOUSE_PORT: 6123
       CLICKHOUSE_DB: AncientReport
-      CLICKHOUSE_USER: AncientReport
-      CLICKHOUSE_PASSWORD: AncientReport
-      NATS_URL: nats://65.109.200.75:4222
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-AncientReport}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-AncientReport}
+      NATS_URL: nats://${CENTRAL_SERVER_IP:-localhost}:4222
       NATS_ENABLED: true
       AGENT_HOSTNAME: localtest
       PROMETHEUS_ENABLED: true
@@ -37,5 +37,5 @@ services:
     logging:
       driver: syslog
       options:
-        syslog-address: "udp://65.109.200.75:5515"
+        syslog-address: "udp://${CENTRAL_SERVER_IP:-localhost}:5515"
         tag: "{{.Name}}"
