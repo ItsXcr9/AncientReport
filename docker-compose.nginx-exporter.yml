@@ -1,0 +1,37 @@
+version: "3.8"
+
+# NGINX Prometheus Exporter for AncientReport Auto-Discovery
+# Deploy this alongside your NGINX server to expose metrics
+#
+# Prerequisites:
+# 1. NGINX must have stub_status enabled in its config
+# 2. AncientReport agent must have PROMETHEUS_ENABLED=true
+#
+# The exporter will be auto-discovered by AncientReport via:
+# - Port scan (9113) or
+# - Docker labels (prometheus.io/scrape=true)
+
+services:
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    container_name: nginx-prometheus-exporter
+    restart: always
+    command:
+      - '-nginx.scrape-uri=http://host.docker.internal:80/nginx_status'
+    ports:
+      - "9113:9113"
+    labels:
+      # Auto-discovery labels for AncientReport
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9113"
+      prometheus.io/path: "/metrics"
+      service.name: "xcr9-nginx"
+      service.description: "NGINX Web Server Metrics"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge

@@ -215,7 +215,7 @@ async fn main() -> Result<()> {
         config.agent.hostname.clone(),
         metrics_tx.clone(),
         clickhouse_url.clone(),
-        Some("http://localhost:8800".to_string()), // API URL for config
+        Some("http://65.109.200.75:6800".to_string()), // API URL for config
     );
     let custom_monitor_handle = tokio::spawn(async move {
         if let Err(e) = custom_monitor_manager.start().await {

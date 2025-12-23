@@ -20,7 +20,7 @@ interface MonitorResult {
   error?: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8800';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://65.109.200.75:6800';
 
 export default function CustomMonitors() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);

@@ -201,7 +201,7 @@ impl PrometheusScraper {
                     // Verify it's actually Prometheus format
                     if let Ok(body) = response.text().await {
                         if body.contains("# HELP") || body.contains("# TYPE") || body.contains("_total") {
-                            debug!("Found {} on port {}", exporter_name, port);
+                            info!("✓ Found {} on port {} (valid Prometheus format)", exporter_name, port);
                             targets.push(DiscoveredTarget {
                                 url,
                                 exporter_type: exporter_name.to_string(),
@@ -210,8 +210,11 @@ impl PrometheusScraper {
                         }
                     }
                 }
-                _ => {
-                    // Port not responding, skip
+                Ok(response) => {
+                    debug!("Port {} responded with status {}", port, response.status());
+                }
+                Err(e) => {
+                    debug!("Port {} error: {}", port, e);
                 }
             }
         }
@@ -314,9 +317,11 @@ impl PrometheusScraper {
         }
 
         if all_urls.is_empty() {
-            debug!("No Prometheus targets to scrape");
+            info!("📊 No Prometheus targets to scrape (manual: {}, discovered: 0)", self.manual_targets.len());
             return;
         }
+
+        info!("📊 Scraping {} Prometheus target(s)...", all_urls.len());
 
         // Scrape all targets concurrently
         let futures: Vec<_> = all_urls.iter()
@@ -328,14 +333,12 @@ impl PrometheusScraper {
         let success_count = results.iter().filter(|r| r.is_ok()).count();
         let fail_count = results.iter().filter(|r| r.is_err()).count();
         
-        if fail_count > 0 {
-            debug!("Scrape complete: {} succeeded, {} failed", success_count, fail_count);
-        }
+        info!("✓ Scrape complete: {} succeeded, {} failed", success_count, fail_count);
     }
 
     /// Scrape a single Prometheus target
     async fn scrape_target(&self, target: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        debug!("Scraping Prometheus target: {}", target);
+        info!("  → Scraping: {}", target);
 
         let response = self.client.get(target).send().await?;
         
@@ -378,7 +381,7 @@ impl PrometheusScraper {
             }
         }
 
-        debug!("Scraped {} metrics from {}", sent_count, target);
+        info!("  ✓ Scraped {} metrics from {}", sent_count, target);
         Ok(())
     }
 

@@ -156,7 +156,7 @@ export default function Observability() {
           
           // Auto-select first exporter if none selected
           if (data.exporters?.length > 0 && !selectedDiscoveredExporter) {
-            setSelectedDiscoveredExporter(data.exporters[0].hostname);
+            setSelectedDiscoveredExporter(data.exporters[0].scrape_target);
           }
         }
       } catch (error) {
@@ -503,13 +503,13 @@ export default function Observability() {
           )}
 
           {/* Info about the selected exporter */}
-          {selectedDiscoveredExporter && discoveredExporters.find(e => e.hostname === selectedDiscoveredExporter) && (
+          {selectedDiscoveredExporter && discoveredExporters.find(e => e.scrape_target === selectedDiscoveredExporter) && (
             <div className="mb-4 p-3 bg-green-500/5 rounded-lg border border-green-500/20">
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-4">
                   <span className="text-gray-400">Target:</span>
                   <span className="font-mono text-green-400">
-                    {discoveredExporters.find(e => e.hostname === selectedDiscoveredExporter)?.scrape_target}
+                    {discoveredExporters.find(e => e.scrape_target === selectedDiscoveredExporter)?.scrape_target}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

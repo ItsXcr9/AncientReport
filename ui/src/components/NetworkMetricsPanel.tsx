@@ -602,27 +602,129 @@ export function NetworkMetricsPanel({ selectedNode, compact = false }: MetricsPa
 
         {/* Flows Grid */}
         <div className="glass-card p-6 rounded-lg animate-slide-in" style={{ animationDelay: '700ms' }}>
-          <h3 className="font-semibold mb-6 flex items-center gap-2 text-sm uppercase tracking-wider text-muted-foreground">
-            <Network size={16} className="text-cyan-400" />
-            Active Flows
-          </h3>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold flex items-center gap-2 text-sm uppercase tracking-wider text-muted-foreground">
+                <Network size={16} className="text-cyan-400" />
+                Active Flows
+              </h3>
+              {/* Live indicator with pulse */}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-[10px] text-green-400 font-medium">LIVE</span>
+              </div>
+            </div>
+            {top_flows.length > 0 && (
+              <div className="flex items-center gap-2 text-xs flex-wrap justify-end">
+                <span className="px-2 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20">
+                  {top_flows.filter((f: FlowEdge) => f.state === "ESTABLISHED").length} Established
+                </span>
+                <span className="px-2 py-1 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  {top_flows.filter((f: FlowEdge) => f.state === "LISTEN").length} Listen
+                </span>
+                <span className="px-2 py-1 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                  {top_flows.filter((f: FlowEdge) => f.state === "TIME_WAIT").length} Time-Wait
+                </span>
+                {top_flows.filter((f: FlowEdge) => f.state === "CLOSE_WAIT").length > 0 && (
+                  <span className="px-2 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                    {top_flows.filter((f: FlowEdge) => f.state === "CLOSE_WAIT").length} Close-Wait
+                  </span>
+                )}
+                <span className="text-muted-foreground ml-1">
+                  {top_flows.length} total
+                </span>
+              </div>
+            )}
+          </div>
           {top_flows.length === 0 ? (
             <p className="text-center text-muted-foreground py-8 italic">No active flows</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {top_flows.slice(0, 16).map((flow: FlowEdge, i: number) => (
-                <div key={i} className={`p-3 rounded-lg bg-white/5 border-l-[3px] ${flow.state === "ESTABLISHED" ? "border-l-green-500 bg-green-500/5" : "border-l-yellow-500 bg-yellow-500/5"} hover:bg-white/5 transition-colors text-xs`}>
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <span className="font-mono text-blue-400 font-medium truncate max-w-[100px]">{flow.source_process}</span>
-                    <span className="text-muted-foreground text-[10px]">→</span>
-                    <span className="font-mono text-gray-200 truncate">{flow.dest_ip === "0.0.0.0" ? "*" : flow.dest_ip.split(".").pop()}:{flow.dest_port}</span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground border-t border-white/5 pt-2 mt-1">
-                    <span>{flow.connection_count} conns</span>
-                    <span className={flow.state === "ESTABLISHED" ? "text-green-400 font-medium" : "text-yellow-400 font-medium"}>{flow.state.slice(0, 5)}</span>
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-white/5 font-medium text-xs uppercase tracking-wider">
+                    <th className="text-left py-3 px-3">Process</th>
+                    <th className="text-center py-3 px-2">Dir</th>
+                    <th className="text-left py-3 px-3">Destination</th>
+                    <th className="text-center py-3 px-3">Proto</th>
+                    <th className="text-center py-3 px-3">State</th>
+                    <th className="text-right py-3 px-3">Conns</th>
+                    <th className="text-right py-3 px-3">Traffic</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {top_flows
+                    .filter((flow: FlowEdge) => !(flow.state === "LISTEN" && flow.dest_ip === "0.0.0.0" && flow.source_process === "system"))
+                    .slice(0, 20)
+                    .map((flow: FlowEdge, i: number) => {
+                      const stateColors: Record<string, string> = {
+                        "ESTABLISHED": "bg-green-500/10 text-green-400 border-green-500/30",
+                        "LISTEN": "bg-blue-500/10 text-blue-400 border-blue-500/30",
+                        "TIME_WAIT": "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
+                        "CLOSE_WAIT": "bg-red-500/10 text-red-400 border-red-500/30",
+                        "SYN_SENT": "bg-purple-500/10 text-purple-400 border-purple-500/30",
+                      };
+                      const stateClass = stateColors[flow.state] || "bg-gray-500/10 text-gray-400 border-gray-500/30";
+                      
+                      // Determine direction
+                      const isListen = flow.state === "LISTEN";
+                      const isLocal = flow.dest_ip === "127.0.0.1" || flow.dest_ip.startsWith("192.168.") || flow.dest_ip.startsWith("10.") || flow.dest_ip.startsWith("172.16.") || flow.dest_ip === "0.0.0.0";
+                      const direction = isListen ? "IN" : isLocal ? "LOCAL" : "OUT";
+                      const dirClass = isListen 
+                        ? "bg-blue-500/10 text-blue-400" 
+                        : isLocal 
+                          ? "bg-gray-500/10 text-gray-400" 
+                          : "bg-orange-500/10 text-orange-400";
+                      const dirArrow = isListen ? "←" : isLocal ? "↔" : "→";
+                      
+                      // Format destination nicely
+                      const destDisplay = flow.dest_ip === "0.0.0.0" 
+                        ? <span className="text-muted-foreground italic">any</span>
+                        : flow.dest_ip.startsWith("192.168.") || flow.dest_ip.startsWith("127.")
+                          ? <span className="text-blue-300">{flow.dest_ip}:{flow.dest_port}</span>
+                          : <span className="text-cyan-400">{flow.dest_ip}:{flow.dest_port}</span>;
+                      
+                      return (
+                        <tr key={i} className="hover:bg-white/5 transition-colors">
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-2">
+                              <Server size={14} className="text-blue-400" />
+                              <span className="font-mono text-blue-400 font-medium truncate max-w-[120px]">{flow.source_process}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-2 text-center">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${dirClass}`}>
+                              {dirArrow} {direction}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 font-mono text-xs">
+                            {destDisplay}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${flow.protocol === "TCP" ? "bg-cyan-500/10 text-cyan-400" : "bg-orange-500/10 text-orange-400"}`}>
+                              {flow.protocol}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${stateClass}`}>
+                              {flow.state}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <span className="font-mono text-white">{flow.connection_count}</span>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            {flow.bytes_total > 0 ? (
+                              <span className="font-mono text-purple-400">{formatBytes(flow.bytes_total)}</span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

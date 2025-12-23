@@ -24,7 +24,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8800';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://65.109.200.75:6800';
 
 interface Exporter {
   hostname: string;
