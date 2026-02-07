@@ -95,7 +95,8 @@ async fn main() -> Result<()> {
     let clickhouse_url = url.to_string();
     let docker_collector = DockerCollector::new(clickhouse_url.clone(), config.agent.hostname.clone());
     let docker_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600)); 
+
         loop {
             interval.tick().await;
             if let Err(e) = docker_collector.collect_and_send().await {
@@ -113,7 +114,7 @@ async fn main() -> Result<()> {
     let kafka_hostname = config.agent.hostname.clone();
     let kafka_handle = tokio::spawn(async move {
         let monitor = KafkaMonitor::new(kafka_hostname, kafka_clickhouse_url);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(120));
         loop {
             interval.tick().await;
             if let Err(e) = monitor.collect_and_send().await {
@@ -127,7 +128,7 @@ async fn main() -> Result<()> {
     let redis_hostname = config.agent.hostname.clone();
     let redis_handle = tokio::spawn(async move {
         let monitor = RedisMonitor::new(redis_hostname, redis_clickhouse_url);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
             if let Err(e) = monitor.collect_and_send().await {
@@ -141,7 +142,7 @@ async fn main() -> Result<()> {
     let postgres_hostname = config.agent.hostname.clone();
     let postgres_handle = tokio::spawn(async move {
         let monitor = PostgresMonitor::new(postgres_hostname, postgres_clickhouse_url);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(120));
         loop {
             interval.tick().await;
             if let Err(e) = monitor.collect_and_send().await {
@@ -160,7 +161,7 @@ async fn main() -> Result<()> {
     let nginx_hostname = config.agent.hostname.clone();
     let nginx_handle = tokio::spawn(async move {
         let monitor = NginxMonitor::new(nginx_hostname, nginx_clickhouse_url);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
             if let Err(e) = monitor.collect_and_send().await {
@@ -174,7 +175,7 @@ async fn main() -> Result<()> {
     let mongo_hostname = config.agent.hostname.clone();
     let mongo_handle = tokio::spawn(async move {
         let monitor = MongoMonitor::new(mongo_hostname, mongo_clickhouse_url);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(120));
         loop {
             interval.tick().await;
             if let Err(e) = monitor.collect_and_send().await {
@@ -188,7 +189,7 @@ async fn main() -> Result<()> {
     let ch_hostname = config.agent.hostname.clone();
     let ch_handle = tokio::spawn(async move {
         let monitor = ClickHouseMonitor::new(ch_hostname, ch_clickhouse_url);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(120));
         loop {
             interval.tick().await;
             if let Err(e) = monitor.collect_and_send().await {

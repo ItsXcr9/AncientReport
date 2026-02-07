@@ -8,6 +8,7 @@ use tracing::{info, warn, error, debug};
 pub struct NginxMonitor {
     hostname: String,
     clickhouse_url: String,
+    http_client: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -34,7 +35,14 @@ pub struct NginxMetrics {
 
 impl NginxMonitor {
     pub fn new(hostname: String, clickhouse_url: String) -> Self {
-        Self { hostname, clickhouse_url }
+        Self { 
+            hostname, 
+            clickhouse_url,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
+        }
     }
 
     /// Detect NGINX containers
@@ -279,7 +287,6 @@ impl NginxMonitor {
 
     /// Send metrics to ClickHouse
     async fn send_to_clickhouse(&self, metrics: &NginxMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
         
         // Send all available metrics
         let mut values = Vec::new();
@@ -357,7 +364,7 @@ impl NginxMonitor {
             values.join(", ")
         );
 
-        let response = client
+        let response = self.http_client
             .post(&self.clickhouse_url)
             .body(query)
             .send()

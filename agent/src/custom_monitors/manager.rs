@@ -21,6 +21,7 @@ pub struct CustomMonitorManager {
     monitors: Arc<RwLock<HashMap<String, MonitorInstance>>>,
     api_url: Option<String>,
     clickhouse_url: String,
+    http_client: reqwest::Client,
 }
 
 enum MonitorInstance {
@@ -41,6 +42,10 @@ impl CustomMonitorManager {
             monitors: Arc::new(RwLock::new(HashMap::new())),
             api_url,
             clickhouse_url,
+            http_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .expect("Failed to create HTTP client"),
         }
     }
 
@@ -52,12 +57,14 @@ impl CustomMonitorManager {
         let monitors_clone = self.monitors.clone();
         let hostname_clone = self.hostname.clone();
         let api_url_clone = self.api_url.clone();
+        let http_client = self.http_client.clone();
         
         tokio::spawn(async move {
-            let mut refresh_interval = interval(Duration::from_secs(60));
+        let mut refresh_interval = interval(Duration::from_secs(300)); // Reduced from 60s to 5 min
             loop {
                 refresh_interval.tick().await;
                 if let Err(e) = Self::refresh_configs(
+                    &http_client,
                     &monitors_clone,
                     &hostname_clone,
                     api_url_clone.as_deref(),
@@ -94,13 +101,14 @@ impl CustomMonitorManager {
 
     /// Refresh monitor configurations from API or ClickHouse
     async fn refresh_configs(
+        http_client: &reqwest::Client,
         monitors: &Arc<RwLock<HashMap<String, MonitorInstance>>>,
         hostname: &str,
         api_url: Option<&str>,
     ) -> Result<()> {
         // Try to fetch from API first
         if let Some(url) = api_url {
-            match Self::fetch_configs_from_api(url).await {
+            match Self::fetch_configs_from_api(http_client, url).await {
                 Ok(configs) => {
                     let mut monitors_write = monitors.write().await;
                     for config in configs {
@@ -129,8 +137,7 @@ impl CustomMonitorManager {
         Ok(())
     }
 
-    async fn fetch_configs_from_api(api_url: &str) -> Result<Vec<CustomMonitorConfig>> {
-        let client = reqwest::Client::new();
+    async fn fetch_configs_from_api(client: &reqwest::Client, api_url: &str) -> Result<Vec<CustomMonitorConfig>> {
         let url = format!("{}/api/v3/monitors", api_url);
         
         let response = client
@@ -186,8 +193,6 @@ impl CustomMonitorManager {
     }
 
     async fn store_result(&self, result: &MonitorResult) -> Result<()> {
-        let client = reqwest::Client::new();
-        
         let query = format!(
             r#"INSERT INTO custom_monitor_results 
                (timestamp, monitor_id, monitor_name, hostname, status, latency_ms, response, error) 
@@ -201,7 +206,7 @@ impl CustomMonitorManager {
             result.error.as_deref().unwrap_or("").replace('\'', "''"),
         );
 
-        client
+        self.http_client
             .post(&self.clickhouse_url)
             .body(query)
             .send()

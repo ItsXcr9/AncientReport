@@ -6,6 +6,7 @@ pub struct DockerCollector {
     clickhouse_url: String,
     docker_path: String,
     hostname: String,
+    http_client: reqwest::Client,
 }
 
 impl DockerCollector {
@@ -17,6 +18,10 @@ impl DockerCollector {
             clickhouse_url,
             docker_path,
             hostname,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
         }
     }
 
@@ -381,7 +386,6 @@ impl DockerCollector {
     async fn send_to_clickhouse(&self, containers: &[serde_json::Value]) 
         -> Result<(), Box<dyn std::error::Error>> {
         
-        let client = reqwest::Client::new();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -397,7 +401,7 @@ impl DockerCollector {
                 obj.insert("timestamp".to_string(), json!(timestamp));
             }
 
-            let response = client
+            let response = self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", query)])
                 .json(&data)

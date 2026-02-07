@@ -29,6 +29,7 @@ pub struct RedisMonitor {
     hostname: String,
     clickhouse_url: String,
     docker_path: String,
+    http_client: reqwest::Client,
 }
 
 impl RedisMonitor {
@@ -39,6 +40,10 @@ impl RedisMonitor {
             hostname,
             clickhouse_url,
             docker_path,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
         }
     }
 
@@ -411,7 +416,6 @@ impl RedisMonitor {
 
     /// Send metrics to ClickHouse
     async fn send_to_clickhouse(&self, metrics: &RedisMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
 
         // Send all metrics
         for (metric_name, value) in &metrics.metrics {
@@ -425,7 +429,7 @@ impl RedisMonitor {
                 "db": ""
             });
 
-            let response = client
+            let response = self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO redis_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -451,7 +455,7 @@ impl RedisMonitor {
                 "db": db_name
             });
 
-            client
+            self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO redis_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -469,7 +473,7 @@ impl RedisMonitor {
                 "db": db_name
             });
 
-            client
+            self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO redis_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -487,7 +491,7 @@ impl RedisMonitor {
                 "db": db_name
             });
 
-            client
+            self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO redis_metrics FORMAT JSONEachRow")])
                 .json(&data)

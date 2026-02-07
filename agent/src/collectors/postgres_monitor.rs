@@ -28,6 +28,7 @@ pub struct PostgresMonitor {
     hostname: String,
     clickhouse_url: String,
     docker_path: String,
+    http_client: reqwest::Client,
 }
 
 impl PostgresMonitor {
@@ -38,6 +39,10 @@ impl PostgresMonitor {
             hostname,
             clickhouse_url,
             docker_path,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
         }
     }
 
@@ -559,7 +564,6 @@ impl PostgresMonitor {
 
     /// Send metrics to ClickHouse
     async fn send_to_clickhouse(&self, metrics: &PostgresMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
 
         // Send global metrics
         for (metric_name, value) in &metrics.global_metrics {
@@ -574,7 +578,7 @@ impl PostgresMonitor {
                 "extra": ""
             });
 
-            let response = client
+            let response = self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO postgres_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -601,7 +605,7 @@ impl PostgresMonitor {
                     "extra": ""
                 });
 
-                client
+                self.http_client
                     .post(&self.clickhouse_url)
                     .query(&[("query", "INSERT INTO postgres_metrics FORMAT JSONEachRow")])
                     .json(&data)

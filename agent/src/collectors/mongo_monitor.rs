@@ -8,6 +8,7 @@ use serde_json::Value;
 pub struct MongoMonitor {
     hostname: String,
     clickhouse_url: String,
+    http_client: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,7 +43,14 @@ pub struct MongoMetrics {
 
 impl MongoMonitor {
     pub fn new(hostname: String, clickhouse_url: String) -> Self {
-        Self { hostname, clickhouse_url }
+        Self { 
+            hostname, 
+            clickhouse_url,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
+        }
     }
 
     /// Detect MongoDB containers
@@ -189,7 +197,6 @@ impl MongoMonitor {
 
     /// Send metrics to ClickHouse
     async fn send_to_clickhouse(&self, metrics: &MongoMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
         
         let query = format!(
             "INSERT INTO AncientReport.mongo_metrics (timestamp, hostname, container_id, container_name, metric_name, value) VALUES \
@@ -219,7 +226,7 @@ impl MongoMonitor {
             self.hostname, metrics.container_id, metrics.container_name, if metrics.is_primary { 1 } else { 0 }
         );
 
-        let response = client
+        let response = self.http_client
             .post(&self.clickhouse_url)
             .body(query)
             .send()

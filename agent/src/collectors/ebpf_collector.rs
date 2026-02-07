@@ -293,8 +293,9 @@ impl EbpfCollector {
             
             debug!("eBPF collector: published metrics for {} processes", published);
             
-            // Update prev_stats for next iteration
-            prev_stats = current_stats;
+            // Clean up dead PIDs and update with current stats
+            prev_stats.retain(|pid, _| current_stats.contains_key(pid));
+            prev_stats.extend(current_stats);
         }
     }
 }

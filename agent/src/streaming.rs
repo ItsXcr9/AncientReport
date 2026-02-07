@@ -36,9 +36,9 @@ impl StreamingPublisher {
         Ok(Self {
             client,
             context,
-            buffer: Vec::with_capacity(1000),
-            max_buffer_size: 1000,
-            flush_interval: Duration::from_secs(10),
+            buffer: Vec::with_capacity(2000),
+            max_buffer_size: 2000,
+            flush_interval: Duration::from_secs(30),
         })
     }
     

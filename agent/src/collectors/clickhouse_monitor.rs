@@ -8,6 +8,7 @@ use tracing::{info, warn, error, debug};
 pub struct ClickHouseMonitor {
     hostname: String,
     clickhouse_url: String,
+    http_client: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,7 +43,14 @@ pub struct ClickHouseMetrics {
 
 impl ClickHouseMonitor {
     pub fn new(hostname: String, clickhouse_url: String) -> Self {
-        Self { hostname, clickhouse_url }
+        Self { 
+            hostname, 
+            clickhouse_url,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
+        }
     }
 
     /// Detect ClickHouse containers
@@ -189,7 +197,6 @@ impl ClickHouseMonitor {
 
     /// Send metrics to ClickHouse (self-monitoring to same or different instance)
     async fn send_to_clickhouse(&self, metrics: &ClickHouseMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
         
         let query = format!(
             "INSERT INTO AncientReport.clickhouse_metrics (timestamp, hostname, container_id, container_name, metric_name, value) VALUES \
@@ -219,7 +226,7 @@ impl ClickHouseMonitor {
             self.hostname, metrics.container_id, metrics.container_name, metrics.delayed_inserts
         );
 
-        let response = client
+        let response = self.http_client
             .post(&self.clickhouse_url)
             .body(query)
             .send()

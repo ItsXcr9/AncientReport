@@ -1,12 +1,7 @@
-#version: "3.8"
-
-# Remote Agent - Deploy on each monitored server
-# This agent collects metrics and sends them to the central ClickHouse server
-# Configure the central server IP in .env file
 
 services:
   agent:
-    image: ghcr.io/itsxcr9/ancientreport/agent:latest
+    image: registry.xcr9.site/images/ancientreport-agent:latest
     container_name: AncientReport-agent
     network_mode: host
     pid: "host" # Required to see host processes, not container processes
@@ -29,7 +24,6 @@ services:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /sys/fs/bpf:/sys/fs/bpf:ro
       - /proc:/host/proc:ro
-      - ./agent:/etc/AncientReport/config-source:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro

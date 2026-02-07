@@ -27,10 +27,44 @@
         <flush_interval_milliseconds>7500</flush_interval_milliseconds>
     </query_log>
     
-    <!-- Disable unnecessary logs for performance -->
+    <!-- Disable unnecessary logs for performance and disk space -->
     <query_thread_log remove="1"/>
     <query_views_log remove="1"/>
     <part_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    
+    <!-- Limit system log retention to prevent disk bloat (3 days) -->
+    <text_log>
+        <database>system</database>
+        <table>text_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_time + INTERVAL 3 DAY</ttl>
+        <partition_by>toYYYYMM(event_time)</partition_by>
+    </text_log>
+    
+    <trace_log>
+        <database>system</database>
+        <table>trace_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_time + INTERVAL 3 DAY</ttl>
+        <partition_by>toYYYYMM(event_time)</partition_by>
+    </trace_log>
+    
+    <metric_log>
+        <database>system</database>
+        <table>metric_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_time + INTERVAL 7 DAY</ttl>
+        <partition_by>toYYYYMM(event_time)</partition_by>
+    </metric_log>
+    
+    <asynchronous_metric_log>
+        <database>system</database>
+        <table>asynchronous_metric_log</table>
+        <flush_interval_milliseconds>7000</flush_interval_milliseconds>
+        <ttl>event_time + INTERVAL 7 DAY</ttl>
+        <partition_by>toYYYYMM(event_time)</partition_by>
+    </asynchronous_metric_log>
     
     <!-- Compression - LZ4 for faster inserts -->
     <compression>

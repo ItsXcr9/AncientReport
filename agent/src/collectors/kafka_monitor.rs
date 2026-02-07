@@ -43,6 +43,7 @@ pub struct KafkaMonitor {
     hostname: String,
     clickhouse_url: String,
     docker_path: String,
+    http_client: reqwest::Client,
 }
 
 impl KafkaMonitor {
@@ -53,6 +54,10 @@ impl KafkaMonitor {
             hostname,
             clickhouse_url,
             docker_path,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client"),
         }
     }
 
@@ -555,7 +560,6 @@ impl KafkaMonitor {
 
     /// Send metrics to ClickHouse
     async fn send_to_clickhouse(&self, metrics: &KafkaMetrics) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
 
         // Send aggregate metrics
         for (metric_name, value) in &metrics.metrics {
@@ -572,7 +576,7 @@ impl KafkaMonitor {
                 "partition": -1
             });
 
-            let response = client
+            let response = self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO kafka_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -600,7 +604,7 @@ impl KafkaMonitor {
                 "partition": lag.partition
             });
 
-            client
+            self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO kafka_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -624,7 +628,7 @@ impl KafkaMonitor {
                 "partition": -1
             });
 
-            client
+            self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO kafka_metrics FORMAT JSONEachRow")])
                 .json(&data)
@@ -645,7 +649,7 @@ impl KafkaMonitor {
                 "partition": -1
             });
 
-            client
+            self.http_client
                 .post(&self.clickhouse_url)
                 .query(&[("query", "INSERT INTO kafka_metrics FORMAT JSONEachRow")])
                 .json(&data)

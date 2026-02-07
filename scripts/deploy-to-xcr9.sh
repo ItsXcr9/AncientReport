@@ -37,11 +37,17 @@ rsync -avz --progress \
   ./ui/src/ \
   $XCR9_HOST:$XCR9_PATH/ui/src/
 
+# Sync Agent files
+echo "  → Syncing Agent components..."
+rsync -avz --progress --exclude 'target' \
+  ./agent/ \
+  $XCR9_HOST:$XCR9_PATH/agent/
+
 # Sync docker-compose if needed
 echo "  → Syncing docker-compose files..."
 rsync -avz --progress \
-  ./docker-compose.yml \
-  $XCR9_HOST:$XCR9_PATH/
+  ./remote_docker_compose.yml \
+  $XCR9_HOST:$XCR9_PATH/docker-compose.yml
 
 echo "✓ Files synced successfully"
 

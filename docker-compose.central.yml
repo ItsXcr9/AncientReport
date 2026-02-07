@@ -1,8 +1,3 @@
-version: '3.8'
-
-# Central Control Server - Deploy on main monitoring server
-# This runs ClickHouse database, Analysis engine, and UI
-# Agents on remote servers will connect to this ClickHouse instance
 
 services:
   nats:
@@ -74,10 +69,7 @@ services:
 
   # Python analysis engine
   analysis:
-    # image: ghcr.io/itsxcr9/ancientreport/analysis:latest
-    build: 
-      context: ./analysis
-      dockerfile: Dockerfile
+    image: registry.xcr9.site/images/ancientreport-analysis:latest
     container_name: AncientReport-analysis
     ports:
       - "6800:8800"
@@ -105,7 +97,6 @@ services:
       UVICORN_LIMIT_MAX_REQUESTS: "1000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./analysis/src:/app/src:ro
     depends_on:
       - clickhouse
       - nats
@@ -127,10 +118,7 @@ services:
 
   # React frontend
   ui:
-    # image: ghcr.io/itsxcr9/ancientreport/ui:latest
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
+    image: registry.xcr9.site/images/ancientreport-ui:latest
     container_name: AncientReport-ui
     ports:
       - "6080:3000"
